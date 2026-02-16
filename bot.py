@@ -6,8 +6,7 @@ from config import BOT_TOKEN
 from handlers import start, proxy, v2ray, wireguard, dns, buy, support, admin
 from middlewares import CheckSubscriptionMiddleware
 from database import init_db
-# از آنجا که به‌روزرسانی خودکار پروکسی غیرفعال شده، خط زیر کامنت شده است
-# from utils.proxy_updater import update_proxies_periodically
+import keep_alive  # <-- اضافه شده
 
 logging.basicConfig(level=logging.INFO)
 
@@ -20,6 +19,9 @@ async def set_commands(bot: Bot):
     await bot.set_my_commands(commands)
 
 async def main():
+    # شروع سرور وب برای باز نگه‌داشتن پورت
+    keep_alive.start_server()  # <-- اضافه شده
+
     await init_db()
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher()
@@ -37,9 +39,6 @@ async def main():
     dp.include_router(admin.router)
 
     await set_commands(bot)
-
-    # به‌روزرسانی خودکار پروکسی غیرفعال شده است
-    # asyncio.create_task(update_proxies_periodically())
 
     await dp.start_polling(bot)
 
