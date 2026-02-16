@@ -204,7 +204,7 @@ async def add_v2rays_command(message: Message):
     cleaned_lines = []
     for line in lines:
         line = line.strip()
-        # اگه خط شامل کلمات فارسی خاص مثل "خطاها" یا "کانفیگ" باشه، نادیده بگیر
+        # اگه خط شامل کلمات فارسی باشد و لینک نباشد، نادیده بگیر
         if re.search(r'[آ-ی]', line) and not is_valid_v2ray_link(line):
             continue
         cleaned_lines.append(line)
