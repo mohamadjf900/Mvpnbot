@@ -49,10 +49,13 @@ async def add_proxy_command(message: Message):
     _, ptype, ip, port = args
     try:
         port = int(port)
+        # اول همه پروکسی‌های قبلی را پاک کن
+        await db.delete_all_proxies()
+        # سپس پروکسی جدید را اضافه کن
         await db.add_proxy(ptype, ip, port)
-        await message.answer("✅ پروکسی اضافه شد.")
-    except:
-        await message.answer("خطا در افزودن.")
+        await message.answer("✅ پروکسی جدید جایگزین شد.")
+    except Exception as e:
+        await message.answer(f"خطا: {e}")
 
 @router.message(Command("add_v2ray"))
 async def add_v2ray_command(message: Message):
@@ -63,8 +66,14 @@ async def add_v2ray_command(message: Message):
         await message.answer("فرمت: /add_v2ray <link> <remarks>")
         return
     _, link, remarks = parts
-    await db.add_v2ray(link, remarks)
-    await message.answer("✅ کانفیگ V2Ray اضافه شد.")
+    try:
+        # اول همه کانفیگ‌های قبلی را پاک کن
+        await db.delete_all_v2ray()
+        # سپس کانفیگ جدید را اضافه کن
+        await db.add_v2ray(link, remarks)
+        await message.answer("✅ کانفیگ V2Ray جدید جایگزین شد.")
+    except Exception as e:
+        await message.answer(f"خطا: {e}")
 
 @router.message(Command("add_wireguard"))
 async def add_wireguard_command(message: Message):
@@ -75,5 +84,11 @@ async def add_wireguard_command(message: Message):
         await message.answer("فرمت: /add_wireguard <config_text> <remarks>")
         return
     _, config_text, remarks = parts
-    await db.add_wireguard(config_text, remarks)
-    await message.answer("✅ کانفیگ WireGuard اضافه شد.")
+    try:
+        # اول همه کانفیگ‌های قبلی را پاک کن
+        await db.delete_all_wireguard()
+        # سپس کانفیگ جدید را اضافه کن
+        await db.add_wireguard(config_text, remarks)
+        await message.answer("✅ کانفیگ WireGuard جدید جایگزین شد.")
+    except Exception as e:
+        await message.answer(f"خطا: {e}")
