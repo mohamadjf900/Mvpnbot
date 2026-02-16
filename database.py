@@ -15,7 +15,7 @@ async def init_db():
                 last_activity TIMESTAMP
             )
         ''')
-        # Proxies table (new schema: stores full URL)
+        # Proxies table
         await db.execute('''
             CREATE TABLE IF NOT EXISTS proxies (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -92,7 +92,7 @@ async def get_all_users():
             rows = await cursor.fetchall()
             return [row[0] for row in rows]
 
-# ---------- Proxy functions (new) ----------
+# ---------- Proxy functions ----------
 async def add_proxy(url: str, remarks: str):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
