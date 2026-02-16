@@ -112,6 +112,12 @@ async def get_active_proxies(limit: int = 50):
             rows = await cursor.fetchall()
             return [{"type": row[0], "ip": row[1], "port": row[2]} for row in rows]
 
+async def delete_all_proxies():
+    """حذف تمام پروکسی‌ها"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM proxies")
+        await db.commit()
+
 # ---------- V2Ray functions ----------
 async def add_v2ray(link: str, remarks: str):
     async with aiosqlite.connect(DB_PATH) as db:
@@ -127,6 +133,12 @@ async def get_all_v2ray():
             rows = await cursor.fetchall()
             return [{"link": row[0], "remarks": row[1]} for row in rows]
 
+async def delete_all_v2ray():
+    """حذف تمام کانفیگ‌های V2Ray"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM v2ray")
+        await db.commit()
+
 # ---------- WireGuard functions ----------
 async def add_wireguard(config: str, remarks: str):
     async with aiosqlite.connect(DB_PATH) as db:
@@ -141,6 +153,12 @@ async def get_all_wireguard():
         async with db.execute("SELECT config, remarks FROM wireguard ORDER BY added_date DESC") as cursor:
             rows = await cursor.fetchall()
             return [{"config": row[0], "remarks": row[1]} for row in rows]
+
+async def delete_all_wireguard():
+    """حذف تمام کانفیگ‌های WireGuard"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM wireguard")
+        await db.commit()
 
 # ---------- Usage logs ----------
 async def log_usage(user_id: int, section: str):
