@@ -6,7 +6,7 @@ from config import BOT_TOKEN
 from handlers import start, proxy, v2ray, wireguard, dns, buy, support, admin
 from middlewares import CheckSubscriptionMiddleware
 from database import init_db
-import keep_alive  # <-- اضافه شده
+import keep_alive  # <-- این خط جدید است
 
 logging.basicConfig(level=logging.INFO)
 
@@ -19,9 +19,7 @@ async def set_commands(bot: Bot):
     await bot.set_my_commands(commands)
 
 async def main():
-    # شروع سرور وب برای باز نگه‌داشتن پورت
-    keep_alive.start_server()  # <-- اضافه شده
-
+    keep_alive.start_server()  # <-- این خط جدید است
     await init_db()
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher()
@@ -39,7 +37,6 @@ async def main():
     dp.include_router(admin.router)
 
     await set_commands(bot)
-
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
