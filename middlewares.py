@@ -26,10 +26,11 @@ class CheckSubscriptionMiddleware(BaseMiddleware):
                 raise Exception("not member")
         except:
             keyboard = InlineKeyboardBuilder()
-            keyboard.add(InlineKeyboardButton(text="عضویت در کانال", url=config.CHANNEL_LINK))
+            keyboard.add(InlineKeyboardButton(text="📢 عضویت در کانال", url=config.CHANNEL_LINK))
             keyboard.add(InlineKeyboardButton(text="✅ عضو شدم", callback_data="check_join"))
+            keyboard.adjust(1)
             await event.answer(
-                "برای استفاده از ربات باید در کانال ما عضو شوید.",
+                "🔒 برای استفاده از ربات باید در کانال ما عضو شوید.\nپس از عضویت، دکمه «عضو شدم» را بزنید.",
                 reply_markup=keyboard.as_markup()
             )
             return
