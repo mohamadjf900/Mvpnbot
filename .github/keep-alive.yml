@@ -2,9 +2,8 @@ name: Keep Render Awake
 
 on:
   schedule:
-    # هر ۱۲ دقیقه یکبار اجرا میشه (می‌تونی عدد رو تغییر بدی)
-    - cron: '*/12 * * * *'
-  workflow_dispatch:  # این اجازه میده دستی هم اجراش کنی
+    - cron: '*/12 * * * *'   # هر ۳ دقیقه یکبار
+  workflow_dispatch:
 
 jobs:
   ping:
@@ -12,7 +11,6 @@ jobs:
     steps:
       - name: Send HTTP Request to Keep Service Alive
         run: |
-          # آدرس رباتت رو اینجا بذار (مثلاً https://mvpnot-3.onrender.com)
           RENDER_SERVICE_URL="https://mvpnbot-3.onrender.com"
           echo "Pinging ${RENDER_SERVICE_URL}..."
           curl -s -o /dev/null "${RENDER_SERVICE_URL}"
