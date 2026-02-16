@@ -40,6 +40,14 @@ async def broadcast_command(message: Message):
             fail += 1
     await message.answer(f"✅ ارسال شد: {success}\n❌ ناموفق: {fail}")
 
+# ================== توابع کمکی برای استخراج remarks ==================
+
+def extract_remarks_from_link(link: str) -> str:
+    """استخراج remarks از انتهای لینک V2Ray (بعد از #)"""
+    if '#' in link:
+        return link.split('#', 1)[1].strip()
+    return "V2Ray Config"
+
 # ================== دستورات پروکسی (با لینک مستقیم) ==================
 
 @router.message(Command("add_proxy"))
@@ -47,17 +55,26 @@ async def add_proxy_command(message: Message):
     if not is_admin(message.from_user.id):
         return
     parts = message.text.split(maxsplit=2)
-    if len(parts) < 3:
+    if len(parts) == 2:
+        # فقط url داده شده
+        _, url = parts
+        url = url.strip()
+        remarks = "Proxy"
+    elif len(parts) >= 3:
+        # url و remarks داده شده
+        _, url, remarks = parts
+        url = url.strip()
+        remarks = remarks.strip()
+    else:
         await message.answer(
-            "فرمت: /add_proxy <url> <remarks>\n"
+            "فرمت: /add_proxy <url> [remarks]\n"
             "مثال: /add_proxy https://t.me/proxy?server=195.254.165.211&port=4455&secret=... پروکسی روسیه"
         )
         return
-    _, url, remarks = parts
     try:
         await db.delete_all_proxies()
-        await db.add_proxy(url.strip(), remarks.strip())
-        await message.answer("✅ پروکسی جدید جایگزین شد.")
+        await db.add_proxy(url, remarks)
+        await message.answer(f"✅ پروکسی جدید با نام «{remarks}» جایگزین شد.")
     except Exception as e:
         await message.answer(f"خطا: {e}")
 
@@ -68,11 +85,8 @@ async def add_proxies_command(message: Message):
     text = message.text.replace("/add_proxies", "").strip()
     if not text:
         await message.answer(
-            "لطفاً لیست پروکسی‌ها را به فرمت زیر ارسال کنید:\n"
-            "url|remarks\n"
-            "https://t.me/proxy?server=...|پروکسی اول\n"
-            "https://t.me/proxy?server=...|پروکسی دوم\n"
-            "(هر خط یک پروکسی، با | جدا شود)"
+            "لطفاً لیست پروکسی‌ها را ارسال کنید.\n"
+            "هر خط می‌تواند یک لینک مستقیم باشد (مثلاً https://t.me/proxy?server=...) یا به فرمت url|remarks."
         )
         return
     lines = text.split('\n')
@@ -81,19 +95,21 @@ async def add_proxies_command(message: Message):
     await db.delete_all_proxies()
     for line in lines:
         line = line.strip()
-        if not line:
+        # نادیده گرفتن خطوط خالی یا بی‌محتوا (مثل رشته‌های بلند A)
+        if not line or len(line) < 10 or line.replace('A', '') == '':
             continue
-        if '|' not in line:
-            errors.append(f"خطای فرمت (| یافت نشد): {line}")
-            continue
-        url, remarks = line.split('|', 1)
-        url = url.strip()
-        remarks = remarks.strip()
+        if '|' in line:
+            url, remarks = line.split('|', 1)
+            url = url.strip()
+            remarks = remarks.strip()
+        else:
+            url = line
+            remarks = "Proxy"
         try:
             await db.add_proxy(url, remarks)
             added += 1
         except Exception as e:
-            errors.append(f"خطا در افزودن {remarks}: {e}")
+            errors.append(f"خطا در افزودن {url[:30]}... : {e}")
     result = f"✅ {added} پروکسی جدید جایگزین شد."
     if errors:
         result += "\n\n❌ خطاها:\n" + "\n".join(errors[:5])
@@ -101,21 +117,18 @@ async def add_proxies_command(message: Message):
 
 # ================== دستورات V2Ray (با پشتیبانی از # در لینک) ==================
 
-def extract_remarks_from_link(link: str) -> str:
-    if '#' in link:
-        return link.split('#', 1)[1].strip()
-    return "V2Ray Config"
-
 @router.message(Command("add_v2ray"))
 async def add_v2ray_command(message: Message):
     if not is_admin(message.from_user.id):
         return
     parts = message.text.split(maxsplit=2)
     if len(parts) == 2:
+        # فقط لینک داده شده
         _, link = parts
         link = link.strip()
         remarks = extract_remarks_from_link(link)
     elif len(parts) >= 3:
+        # هم لینک و هم remarks داده شده
         _, link, remarks = parts
         link = link.strip()
         remarks = remarks.strip()
@@ -123,7 +136,7 @@ async def add_v2ray_command(message: Message):
         await message.answer(
             "فرمت: /add_v2ray <link> [remarks]\n"
             "اگر remarks ذکر نشود، از قسمت # در لینک استخراج می‌شود.\n"
-            "مثال: /add_v2ray vless://...@...?...#shankamil"
+            "مثال: /add_v2ray vless://...@...?...#name"
         )
         return
     try:
@@ -179,13 +192,16 @@ async def add_wireguard_command(message: Message):
         return
     parts = message.text.split(maxsplit=2)
     if len(parts) < 3:
-        await message.answer("فرمت: /add_wireguard <config_text> <remarks>\nمثال: /add_wireguard [Interface]... سرور اول")
+        await message.answer(
+            "فرمت: /add_wireguard <config_text> <remarks>\n"
+            "مثال: /add_wireguard [Interface]... سرور اول"
+        )
         return
     _, config_text, remarks = parts
     try:
         await db.delete_all_wireguard()
         await db.add_wireguard(config_text, remarks)
-        await message.answer("✅ کانفیگ WireGuard جدید جایگزین شد.")
+        await message.answer(f"✅ کانفیگ WireGuard جدید با نام «{remarks}» جایگزین شد.")
     except Exception as e:
         await message.answer(f"خطا: {e}")
 
