@@ -40,15 +40,12 @@ async def broadcast_command(message: Message):
             fail += 1
     await message.answer(f"✅ ارسال شد: {success}\n❌ ناموفق: {fail}")
 
-# ================== توابع کمکی برای استخراج remarks ==================
+# ================== توابع کمکی برای پروکسی ==================
 
-def extract_remarks_from_link(link: str) -> str:
-    """استخراج remarks از انتهای لینک V2Ray (بعد از #)"""
-    if '#' in link:
-        return link.split('#', 1)[1].strip()
-    return "V2Ray Config"
+def is_valid_proxy_url(url: str) -> bool:
+    return url.startswith(('http://', 'https://', 't.me/proxy?'))
 
-# ================== دستورات پروکسی (با لینک مستقیم) ==================
+# ================== دستورات پروکسی ==================
 
 @router.message(Command("add_proxy"))
 async def add_proxy_command(message: Message):
@@ -56,12 +53,10 @@ async def add_proxy_command(message: Message):
         return
     parts = message.text.split(maxsplit=2)
     if len(parts) == 2:
-        # فقط url داده شده
         _, url = parts
         url = url.strip()
         remarks = "Proxy"
     elif len(parts) >= 3:
-        # url و remarks داده شده
         _, url, remarks = parts
         url = url.strip()
         remarks = remarks.strip()
@@ -86,7 +81,7 @@ async def add_proxies_command(message: Message):
     if not text:
         await message.answer(
             "لطفاً لیست پروکسی‌ها را ارسال کنید.\n"
-            "هر خط می‌تواند یک لینک مستقیم باشد (مثلاً https://t.me/proxy?server=...) یا به فرمت url|remarks."
+            "هر خط می‌تواند یک لینک مستقیم باشد (مثلاً https://t.me/proxy?server=...)."
         )
         return
     lines = text.split('\n')
@@ -95,8 +90,7 @@ async def add_proxies_command(message: Message):
     await db.delete_all_proxies()
     for line in lines:
         line = line.strip()
-        # نادیده گرفتن خطوط خالی یا بی‌محتوا (مثل رشته‌های بلند A)
-        if not line or len(line) < 10 or line.replace('A', '') == '':
+        if not line or len(line) < 10:
             continue
         if '|' in line:
             url, remarks = line.split('|', 1)
@@ -115,30 +109,40 @@ async def add_proxies_command(message: Message):
         result += "\n\n❌ خطاها:\n" + "\n".join(errors[:5])
     await message.answer(result)
 
-# ================== دستورات V2Ray (با پشتیبانی از # در لینک) ==================
+# ================== توابع کمکی برای V2Ray ==================
+
+def is_valid_v2ray_link(link: str) -> bool:
+    """تشخیص اینکه آیا یک رشته می‌تونه لینک V2Ray باشه"""
+    return any(link.startswith(prefix) for prefix in ['vless://', 'vmess://', 'trojan://', 'ss://'])
+
+def extract_remarks_from_link(link: str) -> str:
+    """استخراج remarks از انتهای لینک (بعد از #)"""
+    if '#' in link:
+        return link.split('#', 1)[1].strip()
+    return "V2Ray Config"
+
+# ================== دستورات V2Ray ==================
 
 @router.message(Command("add_v2ray"))
 async def add_v2ray_command(message: Message):
     if not is_admin(message.from_user.id):
         return
-    parts = message.text.split(maxsplit=2)
-    if len(parts) == 2:
-        # فقط لینک داده شده
-        _, link = parts
-        link = link.strip()
-        remarks = extract_remarks_from_link(link)
-    elif len(parts) >= 3:
-        # هم لینک و هم remarks داده شده
-        _, link, remarks = parts
+    text = message.text.replace("/add_v2ray", "", 1).strip()
+    if not text:
+        await message.answer(
+            "فرمت: /add_v2ray <link>\n"
+            "مثال: /add_v2ray vless://6919e588-cff3-4c1b-b7a3-3ca0ada5fb69@85.133.200.78:26480?security=none&encryption=none&headerType=none&type=tcp#shankamil"
+        )
+        return
+    
+    if '|' in text:
+        link, remarks = text.split('|', 1)
         link = link.strip()
         remarks = remarks.strip()
     else:
-        await message.answer(
-            "فرمت: /add_v2ray <link> [remarks]\n"
-            "اگر remarks ذکر نشود، از قسمت # در لینک استخراج می‌شود.\n"
-            "مثال: /add_v2ray vless://...@...?...#name"
-        )
-        return
+        link = text
+        remarks = extract_remarks_from_link(link)
+    
     try:
         await db.delete_all_v2ray()
         await db.add_v2ray(link, remarks)
@@ -150,35 +154,62 @@ async def add_v2ray_command(message: Message):
 async def add_v2rays_command(message: Message):
     if not is_admin(message.from_user.id):
         return
-    text = message.text.replace("/add_v2rays", "").strip()
+    
+    text = message.text.replace("/add_v2rays", "", 1).strip()
     if not text:
         await message.answer(
-            "لطفاً لیست کانفیگ‌های V2Ray را به فرمت زیر ارسال کنید:\n"
-            "link|remarks\n"
-            "vless://...|سرور اول\n"
-            "vmess://...|سرور دوم\n"
-            "(هر خط یک کانفیگ، با | جدا شود)"
+            "لطفاً لیست کانفیگ‌های V2Ray را ارسال کنید.\n"
+            "هر خط می‌تواند یک لینک باشد (مثلاً vless://... یا vmess://...).\n"
+            "اگر می‌خواهید remarks جداگانه بدهید، از فرمت link|remarks استفاده کنید."
         )
         return
+    
     lines = text.split('\n')
-    added = 0
-    errors = []
-    await db.delete_all_v2ray()
+    all_links = []
+    current_link = ""
+    in_link = False
+    
     for line in lines:
         line = line.strip()
         if not line:
             continue
-        if '|' not in line:
-            errors.append(f"خطای فرمت (| یافت نشد): {line}")
+        
+        if is_valid_v2ray_link(line):
+            if current_link:
+                all_links.append(current_link.strip())
+            current_link = line
+            in_link = True
+        elif in_link:
+            current_link += line
+        else:
             continue
-        link, remarks = line.split('|', 1)
-        link = link.strip()
-        remarks = remarks.strip()
+    
+    if current_link:
+        all_links.append(current_link.strip())
+    
+    if not all_links:
+        await message.answer("❌ هیچ لینک معتبری یافت نشد.")
+        return
+    
+    added = 0
+    errors = []
+    await db.delete_all_v2ray()
+    
+    for raw_link in all_links:
+        if '|' in raw_link:
+            link, remarks = raw_link.split('|', 1)
+            link = link.strip()
+            remarks = remarks.strip()
+        else:
+            link = raw_link
+            remarks = extract_remarks_from_link(link)
+        
         try:
             await db.add_v2ray(link, remarks)
             added += 1
         except Exception as e:
-            errors.append(f"خطا در افزودن {remarks}: {e}")
+            errors.append(f"خطا در افزودن {link[:30]}... : {e}")
+    
     result = f"✅ {added} کانفیگ V2Ray جدید جایگزین شد."
     if errors:
         result += "\n\n❌ خطاها:\n" + "\n".join(errors[:5])
