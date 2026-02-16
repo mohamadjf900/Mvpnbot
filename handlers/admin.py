@@ -1,11 +1,14 @@
 from aiogram import Router, F
-from aiogram.types import Message
+from aiogram.types import Message, FSInputFile
 from aiogram.filters import Command
 import database as db
 import config
+import os
 import re
+import aiosqlite
 
 router = Router()
+DB_PATH = "bot_database.db"
 
 def is_admin(user_id):
     return user_id in config.ADMIN_IDS
@@ -40,6 +43,37 @@ async def broadcast_command(message: Message):
         except:
             fail += 1
     await message.answer(f"✅ ارسال شد: {success}\n❌ ناموفق: {fail}")
+
+# ================== بکاپ و بازیابی دیتابیس ==================
+
+@router.message(Command("backup"))
+async def backup_db(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    try:
+        if os.path.exists(DB_PATH):
+            await message.answer_document(
+                FSInputFile(DB_PATH, filename="bot_database.db"),
+                caption="✅ بکاپ دیتابیس"
+            )
+        else:
+            await message.answer("❌ فایل دیتابیس وجود ندارد.")
+    except Exception as e:
+        await message.answer(f"❌ خطا در بکاپ: {e}")
+
+@router.message(Command("restore"))
+async def restore_db(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    if not message.document:
+        await message.answer("❌ لطفاً فایل دیتابیس را ارسال کنید.")
+        return
+    try:
+        file = await message.bot.get_file(message.document.file_id)
+        await message.bot.download_file(file.file_path, DB_PATH)
+        await message.answer("✅ دیتابیس با موفقیت بازیابی شد. ربات را ری‌استارت کنید.")
+    except Exception as e:
+        await message.answer(f"❌ خطا در بازیابی: {e}")
 
 # ================== توابع کمکی برای پروکسی ==================
 
