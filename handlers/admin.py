@@ -3,6 +3,7 @@ from aiogram.types import Message
 from aiogram.filters import Command
 import database as db
 import config
+import re
 
 router = Router()
 
@@ -164,28 +165,41 @@ async def add_v2rays_command(message: Message):
         )
         return
     
+    # مرحله 1: حذف خطوط فارسی و بی‌ربط
     lines = text.split('\n')
-    all_links = []
-    current_link = ""
-    in_link = False
-    
+    cleaned_lines = []
     for line in lines:
         line = line.strip()
+        # اگه خط شامل کلمات فارسی خاص مثل "خطاها" یا "کانفیگ" باشه، نادیده بگیر
+        if re.search(r'[آ-ی]', line) and not is_valid_v2ray_link(line):
+            continue
+        cleaned_lines.append(line)
+    
+    # مرحله 2: ادغام خطوطی که با فاصله یا خط تیره شروع می‌شن با خط قبلی
+    merged_lines = []
+    current = ""
+    for line in cleaned_lines:
         if not line:
             continue
-        
-        if is_valid_v2ray_link(line):
-            if current_link:
-                all_links.append(current_link.strip())
-            current_link = line
-            in_link = True
-        elif in_link:
-            current_link += line
+        if line.startswith(('-', ' ')) or (current and not is_valid_v2ray_link(line) and '://' not in line):
+            current += line
         else:
-            continue
+            if current:
+                merged_lines.append(current)
+            current = line
+    if current:
+        merged_lines.append(current)
     
-    if current_link:
-        all_links.append(current_link.strip())
+    # مرحله 3: استخراج لینک‌های معتبر (شامل مواردی که ممکنه در یک خط نباشن)
+    all_links = []
+    for raw in merged_lines:
+        # اگه کل خط با پروتکل شروع نشه، با regex دنبال لینک می‌گردیم
+        if not is_valid_v2ray_link(raw):
+            # الگوی ساده برای پیدا کردن لینک‌های vless، vmess، trojan
+            found = re.findall(r'(vless://[^\s]+|vmess://[^\s]+|trojan://[^\s]+|ss://[^\s]+)', raw)
+            all_links.extend(found)
+        else:
+            all_links.append(raw)
     
     if not all_links:
         await message.answer("❌ هیچ لینک معتبری یافت نشد.")
