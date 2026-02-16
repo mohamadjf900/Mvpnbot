@@ -9,6 +9,8 @@ router = Router()
 def is_admin(user_id):
     return user_id in config.ADMIN_IDS
 
+# ================== دستورات آماری و همگانی ==================
+
 @router.message(Command("stats"))
 async def stats_command(message: Message):
     if not is_admin(message.from_user.id):
@@ -38,21 +40,21 @@ async def broadcast_command(message: Message):
             fail += 1
     await message.answer(f"✅ ارسال شد: {success}\n❌ ناموفق: {fail}")
 
+# ================== دستورات تکی (جایگزینی یک مورد) ==================
+
 @router.message(Command("add_proxy"))
 async def add_proxy_command(message: Message):
     if not is_admin(message.from_user.id):
         return
     args = message.text.split()
     if len(args) != 4:
-        await message.answer("فرمت: /add_proxy <type> <ip> <port>")
+        await message.answer("فرمت: /add_proxy <type> <ip> <port>\nمثال: /add_proxy HTTP 1.2.3.4 8080")
         return
     _, ptype, ip, port = args
     try:
         port = int(port)
-        # اول همه پروکسی‌های قبلی را پاک کن
-        await db.delete_all_proxies()
-        # سپس پروکسی جدید را اضافه کن
-        await db.add_proxy(ptype, ip, port)
+        await db.delete_all_proxies()          # حذف همه پروکسی‌های قبلی
+        await db.add_proxy(ptype.upper(), ip, port)
         await message.answer("✅ پروکسی جدید جایگزین شد.")
     except Exception as e:
         await message.answer(f"خطا: {e}")
@@ -63,13 +65,11 @@ async def add_v2ray_command(message: Message):
         return
     parts = message.text.split(maxsplit=2)
     if len(parts) < 3:
-        await message.answer("فرمت: /add_v2ray <link> <remarks>")
+        await message.answer("فرمت: /add_v2ray <link> <remarks>\nمثال: /add_v2ray vmess://... سرور آلمان")
         return
     _, link, remarks = parts
     try:
-        # اول همه کانفیگ‌های قبلی را پاک کن
-        await db.delete_all_v2ray()
-        # سپس کانفیگ جدید را اضافه کن
+        await db.delete_all_v2ray()            # حذف همه کانفیگ‌های V2Ray قبلی
         await db.add_v2ray(link, remarks)
         await message.answer("✅ کانفیگ V2Ray جدید جایگزین شد.")
     except Exception as e:
@@ -81,14 +81,130 @@ async def add_wireguard_command(message: Message):
         return
     parts = message.text.split(maxsplit=2)
     if len(parts) < 3:
-        await message.answer("فرمت: /add_wireguard <config_text> <remarks>")
+        await message.answer("فرمت: /add_wireguard <config_text> <remarks>\nمثال: /add_wireguard [Interface]... سرور اول")
         return
     _, config_text, remarks = parts
     try:
-        # اول همه کانفیگ‌های قبلی را پاک کن
-        await db.delete_all_wireguard()
-        # سپس کانفیگ جدید را اضافه کن
+        await db.delete_all_wireguard()        # حذف همه کانفیگ‌های WireGuard قبلی
         await db.add_wireguard(config_text, remarks)
         await message.answer("✅ کانفیگ WireGuard جدید جایگزین شد.")
     except Exception as e:
         await message.answer(f"خطا: {e}")
+
+# ================== دستورات جمعی (جایگزینی چند مورد با یک لیست) ==================
+
+@router.message(Command("add_proxies"))
+async def add_proxies_command(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    # حذف متن دستور و گرفتن بلوک متنی
+    text = message.text.replace("/add_proxies", "").strip()
+    if not text:
+        await message.answer(
+            "لطفاً لیست پروکسی‌ها را به فرمت زیر ارسال کنید:\n"
+            "type ip port\n"
+            "HTTP 1.2.3.4 8080\n"
+            "SOCKS5 5.6.7.8 1080\n"
+            "(هر خط یک پروکسی)"
+        )
+        return
+    lines = text.split('\n')
+    added = 0
+    errors = []
+    # پاک کردن همه پروکسی‌های قبلی
+    await db.delete_all_proxies()
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split()
+        if len(parts) != 3:
+            errors.append(f"خطای فرمت: {line}")
+            continue
+        ptype, ip, port = parts
+        try:
+            port = int(port)
+            await db.add_proxy(ptype.upper(), ip, port)
+            added += 1
+        except Exception as e:
+            errors.append(f"خطا در افزودن {line}: {e}")
+    result = f"✅ {added} پروکسی جدید جایگزین شد."
+    if errors:
+        result += "\n\n❌ خطاها:\n" + "\n".join(errors[:5])
+    await message.answer(result)
+
+@router.message(Command("add_v2rays"))
+async def add_v2rays_command(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    text = message.text.replace("/add_v2rays", "").strip()
+    if not text:
+        await message.answer(
+            "لطفاً لیست کانفیگ‌های V2Ray را به فرمت زیر ارسال کنید:\n"
+            "link|remarks\n"
+            "vmess://...|سرور اول\n"
+            "vless://...|سرور دوم\n"
+            "(هر خط یک کانفیگ، با | جدا شود)"
+        )
+        return
+    lines = text.split('\n')
+    added = 0
+    errors = []
+    await db.delete_all_v2ray()
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        if '|' not in line:
+            errors.append(f"خطای فرمت (| یافت نشد): {line}")
+            continue
+        link, remarks = line.split('|', 1)
+        link = link.strip()
+        remarks = remarks.strip()
+        try:
+            await db.add_v2ray(link, remarks)
+            added += 1
+        except Exception as e:
+            errors.append(f"خطا در افزودن {remarks}: {e}")
+    result = f"✅ {added} کانفیگ V2Ray جدید جایگزین شد."
+    if errors:
+        result += "\n\n❌ خطاها:\n" + "\n".join(errors[:5])
+    await message.answer(result)
+
+@router.message(Command("add_wireguards"))
+async def add_wireguards_command(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    text = message.text.replace("/add_wireguards", "").strip()
+    if not text:
+        await message.answer(
+            "لطفاً لیست کانفیگ‌های WireGuard را به فرمت زیر ارسال کنید:\n"
+            "config_text|remarks\n"
+            "[Interface]...|اتصال اول\n"
+            "[Interface]...|اتصال دوم\n"
+            "(هر خط یک کانفیگ، با | جدا شود)"
+        )
+        return
+    lines = text.split('\n')
+    added = 0
+    errors = []
+    await db.delete_all_wireguard()
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        if '|' not in line:
+            errors.append(f"خطای فرمت (| یافت نشد): {line}")
+            continue
+        config_text, remarks = line.split('|', 1)
+        config_text = config_text.strip()
+        remarks = remarks.strip()
+        try:
+            await db.add_wireguard(config_text, remarks)
+            added += 1
+        except Exception as e:
+            errors.append(f"خطا در افزودن {remarks}: {e}")
+    result = f"✅ {added} کانفیگ WireGuard جدید جایگزین شد."
+    if errors:
+        result += "\n\n❌ خطاها:\n" + "\n".join(errors[:5])
+    await message.answer(result)
