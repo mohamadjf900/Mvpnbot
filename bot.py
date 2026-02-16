@@ -37,7 +37,6 @@ async def main():
 
     await set_commands(bot)
 
-    asyncio.create_task(update_proxies_periodically())
 
     await dp.start_polling(bot)
 
