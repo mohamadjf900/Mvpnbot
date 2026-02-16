@@ -28,7 +28,8 @@ async def start_handler(message: Message):
 
 @router.callback_query(F.data == "menu_main")
 async def back_to_main(callback: CallbackQuery):
-    await callback.message.edit_text("منوی اصلی:", reply_markup=await main_menu_keyboard())
+    await callback.message.delete()
+    await callback.message.answer("منوی اصلی:", reply_markup=await main_menu_keyboard())
     await callback.answer()
 
 @router.callback_query(F.data == "check_join")
@@ -39,6 +40,6 @@ async def check_join_callback(callback: CallbackQuery, bot):
             await callback.message.delete()
             await start_handler(callback.message)
         else:
-            await callback.answer("شما هنوز عضو نشده‌اید!", show_alert=True)
+            await callback.answer("❌ شما هنوز عضو نشده‌اید! لطفاً ابتدا عضو شوید.", show_alert=True)
     except:
-        await callback.answer("خطا در بررسی عضویت!", show_alert=True)
+        await callback.answer("خطا در بررسی عضویت! لطفاً دوباره تلاش کنید.", show_alert=True)
