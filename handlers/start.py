@@ -15,7 +15,10 @@ async def main_menu_keyboard():
     builder.button(text="🎮 DNS گیمرها", callback_data="menu_dns")
     builder.button(text="💼 خرید", callback_data="menu_buy")
     builder.button(text="📞 پشتیبانی", callback_data="menu_support")
-    builder.adjust(2)
+    # دکمه جدید برای عضویت در کانال
+    builder.button(text="📢 کانال ما", url=config.CHANNEL_LINK)
+    # تنظیم چینش: دو دکمه در سه ردیف اول، سپس یک دکمه تنها
+    builder.adjust(2, 2, 2, 1)
     return builder.as_markup()
 
 @router.message(Command("start"))
