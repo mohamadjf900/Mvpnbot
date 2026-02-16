@@ -40,98 +40,98 @@ async def broadcast_command(message: Message):
             fail += 1
     await message.answer(f"✅ ارسال شد: {success}\n❌ ناموفق: {fail}")
 
-# ================== دستورات تکی (جایگزینی یک مورد) ==================
+# ================== دستورات پروکسی (با لینک مستقیم) ==================
 
 @router.message(Command("add_proxy"))
 async def add_proxy_command(message: Message):
     if not is_admin(message.from_user.id):
         return
-    args = message.text.split()
-    if len(args) != 4:
-        await message.answer("فرمت: /add_proxy <type> <ip> <port>\nمثال: /add_proxy HTTP 1.2.3.4 8080")
+    parts = message.text.split(maxsplit=2)
+    if len(parts) < 3:
+        await message.answer(
+            "فرمت: /add_proxy <url> <remarks>\n"
+            "مثال: /add_proxy https://t.me/proxy?server=195.254.165.211&port=4455&secret=... پروکسی روسیه"
+        )
         return
-    _, ptype, ip, port = args
+    _, url, remarks = parts
     try:
-        port = int(port)
-        await db.delete_all_proxies()          # حذف همه پروکسی‌های قبلی
-        await db.add_proxy(ptype.upper(), ip, port)
+        await db.delete_all_proxies()
+        await db.add_proxy(url.strip(), remarks.strip())
         await message.answer("✅ پروکسی جدید جایگزین شد.")
     except Exception as e:
         await message.answer(f"خطا: {e}")
+
+@router.message(Command("add_proxies"))
+async def add_proxies_command(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    text = message.text.replace("/add_proxies", "").strip()
+    if not text:
+        await message.answer(
+            "لطفاً لیست پروکسی‌ها را به فرمت زیر ارسال کنید:\n"
+            "url|remarks\n"
+            "https://t.me/proxy?server=...|پروکسی اول\n"
+            "https://t.me/proxy?server=...|پروکسی دوم\n"
+            "(هر خط یک پروکسی، با | جدا شود)"
+        )
+        return
+    lines = text.split('\n')
+    added = 0
+    errors = []
+    await db.delete_all_proxies()
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        if '|' not in line:
+            errors.append(f"خطای فرمت (| یافت نشد): {line}")
+            continue
+        url, remarks = line.split('|', 1)
+        url = url.strip()
+        remarks = remarks.strip()
+        try:
+            await db.add_proxy(url, remarks)
+            added += 1
+        except Exception as e:
+            errors.append(f"خطا در افزودن {remarks}: {e}")
+    result = f"✅ {added} پروکسی جدید جایگزین شد."
+    if errors:
+        result += "\n\n❌ خطاها:\n" + "\n".join(errors[:5])
+    await message.answer(result)
+
+# ================== دستورات V2Ray (با پشتیبانی از # در لینک) ==================
+
+def extract_remarks_from_link(link: str) -> str:
+    if '#' in link:
+        return link.split('#', 1)[1].strip()
+    return "V2Ray Config"
 
 @router.message(Command("add_v2ray"))
 async def add_v2ray_command(message: Message):
     if not is_admin(message.from_user.id):
         return
     parts = message.text.split(maxsplit=2)
-    if len(parts) < 3:
-        await message.answer("فرمت: /add_v2ray <link> <remarks>\nمثال: /add_v2ray vmess://... سرور آلمان")
-        return
-    _, link, remarks = parts
-    try:
-        await db.delete_all_v2ray()            # حذف همه کانفیگ‌های V2Ray قبلی
-        await db.add_v2ray(link, remarks)
-        await message.answer("✅ کانفیگ V2Ray جدید جایگزین شد.")
-    except Exception as e:
-        await message.answer(f"خطا: {e}")
-
-@router.message(Command("add_wireguard"))
-async def add_wireguard_command(message: Message):
-    if not is_admin(message.from_user.id):
-        return
-    parts = message.text.split(maxsplit=2)
-    if len(parts) < 3:
-        await message.answer("فرمت: /add_wireguard <config_text> <remarks>\nمثال: /add_wireguard [Interface]... سرور اول")
-        return
-    _, config_text, remarks = parts
-    try:
-        await db.delete_all_wireguard()        # حذف همه کانفیگ‌های WireGuard قبلی
-        await db.add_wireguard(config_text, remarks)
-        await message.answer("✅ کانفیگ WireGuard جدید جایگزین شد.")
-    except Exception as e:
-        await message.answer(f"خطا: {e}")
-
-# ================== دستورات جمعی (جایگزینی چند مورد با یک لیست) ==================
-
-@router.message(Command("add_proxies"))
-async def add_proxies_command(message: Message):
-    if not is_admin(message.from_user.id):
-        return
-    # حذف متن دستور و گرفتن بلوک متنی
-    text = message.text.replace("/add_proxies", "").strip()
-    if not text:
+    if len(parts) == 2:
+        _, link = parts
+        link = link.strip()
+        remarks = extract_remarks_from_link(link)
+    elif len(parts) >= 3:
+        _, link, remarks = parts
+        link = link.strip()
+        remarks = remarks.strip()
+    else:
         await message.answer(
-            "لطفاً لیست پروکسی‌ها را به فرمت زیر ارسال کنید:\n"
-            "type ip port\n"
-            "HTTP 1.2.3.4 8080\n"
-            "SOCKS5 5.6.7.8 1080\n"
-            "(هر خط یک پروکسی)"
+            "فرمت: /add_v2ray <link> [remarks]\n"
+            "اگر remarks ذکر نشود، از قسمت # در لینک استخراج می‌شود.\n"
+            "مثال: /add_v2ray vless://...@...?...#shankamil"
         )
         return
-    lines = text.split('\n')
-    added = 0
-    errors = []
-    # پاک کردن همه پروکسی‌های قبلی
-    await db.delete_all_proxies()
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        parts = line.split()
-        if len(parts) != 3:
-            errors.append(f"خطای فرمت: {line}")
-            continue
-        ptype, ip, port = parts
-        try:
-            port = int(port)
-            await db.add_proxy(ptype.upper(), ip, port)
-            added += 1
-        except Exception as e:
-            errors.append(f"خطا در افزودن {line}: {e}")
-    result = f"✅ {added} پروکسی جدید جایگزین شد."
-    if errors:
-        result += "\n\n❌ خطاها:\n" + "\n".join(errors[:5])
-    await message.answer(result)
+    try:
+        await db.delete_all_v2ray()
+        await db.add_v2ray(link, remarks)
+        await message.answer(f"✅ کانفیگ V2Ray جدید با نام «{remarks}» جایگزین شد.")
+    except Exception as e:
+        await message.answer(f"خطا: {e}")
 
 @router.message(Command("add_v2rays"))
 async def add_v2rays_command(message: Message):
@@ -142,8 +142,8 @@ async def add_v2rays_command(message: Message):
         await message.answer(
             "لطفاً لیست کانفیگ‌های V2Ray را به فرمت زیر ارسال کنید:\n"
             "link|remarks\n"
-            "vmess://...|سرور اول\n"
-            "vless://...|سرور دوم\n"
+            "vless://...|سرور اول\n"
+            "vmess://...|سرور دوم\n"
             "(هر خط یک کانفیگ، با | جدا شود)"
         )
         return
@@ -170,6 +170,24 @@ async def add_v2rays_command(message: Message):
     if errors:
         result += "\n\n❌ خطاها:\n" + "\n".join(errors[:5])
     await message.answer(result)
+
+# ================== دستورات WireGuard ==================
+
+@router.message(Command("add_wireguard"))
+async def add_wireguard_command(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    parts = message.text.split(maxsplit=2)
+    if len(parts) < 3:
+        await message.answer("فرمت: /add_wireguard <config_text> <remarks>\nمثال: /add_wireguard [Interface]... سرور اول")
+        return
+    _, config_text, remarks = parts
+    try:
+        await db.delete_all_wireguard()
+        await db.add_wireguard(config_text, remarks)
+        await message.answer("✅ کانفیگ WireGuard جدید جایگزین شد.")
+    except Exception as e:
+        await message.answer(f"خطا: {e}")
 
 @router.message(Command("add_wireguards"))
 async def add_wireguards_command(message: Message):
