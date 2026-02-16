@@ -6,7 +6,8 @@ from config import BOT_TOKEN
 from handlers import start, proxy, v2ray, wireguard, dns, buy, support, admin
 from middlewares import CheckSubscriptionMiddleware
 from database import init_db
-from utils.proxy_updater import update_proxies_periodically
+# از آنجا که به‌روزرسانی خودکار پروکسی غیرفعال شده، خط زیر کامنت شده است
+# from utils.proxy_updater import update_proxies_periodically
 
 logging.basicConfig(level=logging.INFO)
 
@@ -37,6 +38,8 @@ async def main():
 
     await set_commands(bot)
 
+    # به‌روزرسانی خودکار پروکسی غیرفعال شده است
+    # asyncio.create_task(update_proxies_periodically())
 
     await dp.start_polling(bot)
 
