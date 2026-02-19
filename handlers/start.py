@@ -13,12 +13,11 @@ async def main_menu_keyboard():
     builder.button(text="📡 V2Ray", callback_data="menu_v2ray")
     builder.button(text="🔒 WireGuard", callback_data="menu_wireguard")
     builder.button(text="🎮 DNS گیمرها", callback_data="menu_dns")
-    builder.button(text="📊 تست پینگ", callback_data="menu_ping")
-    builder.button(text="🎫 تیکت پشتیبانی", callback_data="menu_ticket")  # دکمه جدید
+    builder.button(text="🎫 تیکت پشتیبانی", callback_data="menu_ticket")  # دکمه تیکت
     builder.button(text="💼 خرید", callback_data="menu_buy")
     builder.button(text="📞 پشتیبانی", callback_data="menu_support")
     builder.button(text="📢 کانال ما", url=config.CHANNEL_LINK)
-    builder.adjust(2, 2, 2, 1, 1, 1)
+    builder.adjust(2, 2, 2, 1, 1)  # چینش: ۲-۲-۲-۱-۱
     return builder.as_markup()
 
 @router.message(Command("start"))
