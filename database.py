@@ -1,5 +1,4 @@
 import aiosqlite
-import asyncio
 
 DB_PATH = "bot_database.db"
 
@@ -50,6 +49,28 @@ async def init_db():
                 user_id INTEGER,
                 section TEXT,
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        # Tickets tables
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS tickets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                subject TEXT,
+                status TEXT DEFAULT 'open',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS ticket_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticket_id INTEGER,
+                sender_id INTEGER,
+                message TEXT,
+                file_id TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (ticket_id) REFERENCES tickets (id) ON DELETE CASCADE
             )
         ''')
         await db.commit()
@@ -161,5 +182,69 @@ async def log_usage(user_id: int, section: str):
         await db.execute(
             "INSERT INTO usage_logs (user_id, section) VALUES (?, ?)",
             (user_id, section)
+        )
+        await db.commit()
+
+# ---------- Ticket functions ----------
+async def create_ticket(user_id: int, subject: str) -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "INSERT INTO tickets (user_id, subject) VALUES (?, ?) RETURNING id",
+            (user_id, subject)
+        )
+        row = await cursor.fetchone()
+        await db.commit()
+        return row[0] if row else None
+
+async def add_ticket_message(ticket_id: int, sender_id: int, message: str = None, file_id: str = None):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO ticket_messages (ticket_id, sender_id, message, file_id) VALUES (?, ?, ?, ?)",
+            (ticket_id, sender_id, message, file_id)
+        )
+        await db.execute(
+            "UPDATE tickets SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (ticket_id,)
+        )
+        await db.commit()
+
+async def get_user_tickets(user_id: int, status: str = None):
+    async with aiosqlite.connect(DB_PATH) as db:
+        query = "SELECT * FROM tickets WHERE user_id = ?"
+        params = [user_id]
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+        query += " ORDER BY created_at DESC"
+        async with db.execute(query, params) as cursor:
+            rows = await cursor.fetchall()
+            return rows
+
+async def get_all_tickets(status: str = None):
+    async with aiosqlite.connect(DB_PATH) as db:
+        query = "SELECT * FROM tickets"
+        params = []
+        if status:
+            query += " WHERE status = ?"
+            params.append(status)
+        query += " ORDER BY created_at DESC"
+        async with db.execute(query, params) as cursor:
+            rows = await cursor.fetchall()
+            return rows
+
+async def get_ticket_messages(ticket_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT * FROM ticket_messages WHERE ticket_id = ? ORDER BY created_at ASC",
+            (ticket_id,)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return rows
+
+async def update_ticket_status(ticket_id: int, status: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE tickets SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (status, ticket_id)
         )
         await db.commit()
