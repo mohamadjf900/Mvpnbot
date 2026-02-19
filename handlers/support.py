@@ -12,7 +12,7 @@ async def support_menu(callback: CallbackQuery):
     text = (
         "📞 برای پشتیبانی و ارتباط با ادمین:\n\n"
         f"👉 @Mj054 (پیام خصوصی)\n"
-        "یا می‌توانید مشکل خود را در قالب یک پیام به ربات بفرستید (در حال توسعه)"
+        "یا می‌توانید مشکل خود را در قالب یک پیام به ربات بفرستید (تیکت پشتیبانی بزنید)"
     )
     await callback.message.edit_text(text, reply_markup=back_button())
     await callback.answer()
