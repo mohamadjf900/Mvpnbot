@@ -15,9 +15,14 @@ logger = logging.getLogger(__name__)
 
 router = Router()
 
-class TicketStates(StatesGroup):
+# State مخصوص ایجاد تیکت
+class TicketCreationStates(StatesGroup):
     waiting_for_subject = State()
     waiting_for_message = State()
+
+# State مخصوص پاسخ به تیکت (برای ادمین)
+class TicketReplyStates(StatesGroup):
+    waiting_for_reply = State()
 
 # ================== منوی اصلی تیکت‌ها ==================
 @router.callback_query(F.data == "menu_ticket")
@@ -44,14 +49,15 @@ async def ticket_menu(callback: CallbackQuery):
 @router.callback_query(F.data == "ticket_new")
 async def ticket_new(callback: CallbackQuery, state: FSMContext):
     logger.info(f"User {callback.from_user.id} started creating new ticket")
-    await state.set_state(TicketStates.waiting_for_subject)
+    await state.clear()  # پاک کردن هر state قبلی
+    await state.set_state(TicketCreationStates.waiting_for_subject)
     await callback.message.edit_text(
         "📝 عنوان تیکت را وارد کنید:\n"
         "(مثلاً: مشکل در اتصال، درخواست کانفیگ جدید، و ...)"
     )
     await callback.answer()
 
-@router.message(TicketStates.waiting_for_subject)
+@router.message(TicketCreationStates.waiting_for_subject)
 async def ticket_subject_received(message: Message, state: FSMContext):
     logger.info(f"Received subject from user {message.from_user.id}: {message.text}")
     subject = message.text.strip()
@@ -60,14 +66,14 @@ async def ticket_subject_received(message: Message, state: FSMContext):
         return
     
     await state.update_data(subject=subject)
-    await state.set_state(TicketStates.waiting_for_message)
+    await state.set_state(TicketCreationStates.waiting_for_message)
     await message.answer(
         "✍️ پیام خود را وارد کنید.\n"
         "می‌توانید متن بفرستید یا فایل (عکس، سند) ضمیمه کنید.\n"
         "برای لغو، /cancel را بزنید."
     )
 
-@router.message(TicketStates.waiting_for_message)
+@router.message(TicketCreationStates.waiting_for_message)
 async def ticket_message_received(message: Message, state: FSMContext):
     logger.info(f"Received message from user {message.from_user.id}")
     data = await state.get_data()
@@ -204,9 +210,10 @@ async def ticket_reply(callback: CallbackQuery, state: FSMContext):
         await callback.answer("شما دسترسی ادمین ندارید!", show_alert=True)
         return
     
-    # ذخیره ticket_id در state
+    # پاک کردن state قبلی و تنظیم state جدید
+    await state.clear()
     await state.update_data(ticket_id=ticket_id)
-    await state.set_state(TicketStates.waiting_for_message)
+    await state.set_state(TicketReplyStates.waiting_for_reply)
     
     await callback.message.edit_text(
         "✍️ پاسخ خود را وارد کنید (متن یا فایل):\n"
@@ -214,7 +221,7 @@ async def ticket_reply(callback: CallbackQuery, state: FSMContext):
     )
     await callback.answer()
 
-@router.message(TicketStates.waiting_for_message)
+@router.message(TicketReplyStates.waiting_for_reply)
 async def ticket_reply_received(message: Message, state: FSMContext):
     logger.info(f"Received reply from user {message.from_user.id}")
     
