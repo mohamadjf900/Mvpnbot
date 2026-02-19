@@ -1,12 +1,17 @@
+import logging
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from aiogram.filters import Command, StateFilter
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 import database as db
 import config
 import aiosqlite
+
+# تنظیم لاگ
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 router = Router()
 
@@ -17,6 +22,7 @@ class TicketStates(StatesGroup):
 # ================== منوی اصلی تیکت‌ها ==================
 @router.callback_query(F.data == "menu_ticket")
 async def ticket_menu(callback: CallbackQuery):
+    logger.info(f"User {callback.from_user.id} opened ticket menu")
     await db.update_activity(callback.from_user.id)
     
     builder = InlineKeyboardBuilder()
@@ -37,6 +43,7 @@ async def ticket_menu(callback: CallbackQuery):
 # ================== ایجاد تیکت جدید ==================
 @router.callback_query(F.data == "ticket_new")
 async def ticket_new(callback: CallbackQuery, state: FSMContext):
+    logger.info(f"User {callback.from_user.id} started creating new ticket")
     await state.set_state(TicketStates.waiting_for_subject)
     await callback.message.edit_text(
         "📝 عنوان تیکت را وارد کنید:\n"
@@ -46,6 +53,7 @@ async def ticket_new(callback: CallbackQuery, state: FSMContext):
 
 @router.message(TicketStates.waiting_for_subject)
 async def ticket_subject_received(message: Message, state: FSMContext):
+    logger.info(f"Received subject from user {message.from_user.id}: {message.text}")
     subject = message.text.strip()
     if len(subject) < 3 or len(subject) > 100:
         await message.answer("عنوان باید بین ۳ تا ۱۰۰ کاراکتر باشد. لطفاً دوباره وارد کنید.")
@@ -61,9 +69,14 @@ async def ticket_subject_received(message: Message, state: FSMContext):
 
 @router.message(TicketStates.waiting_for_message)
 async def ticket_message_received(message: Message, state: FSMContext):
+    logger.info(f"Received message from user {message.from_user.id}")
     data = await state.get_data()
-    subject = data['subject']
+    if 'subject' not in data:
+        await state.clear()
+        await message.answer("خطایی رخ داد. لطفاً دوباره تلاش کنید.")
+        return
     
+    subject = data['subject']
     ticket_id = await db.create_ticket(message.from_user.id, subject)
     
     file_id = None
@@ -81,6 +94,7 @@ async def ticket_message_received(message: Message, state: FSMContext):
     
     await state.clear()
     
+    # اطلاع به ادمین‌ها
     for admin_id in config.ADMIN_IDS:
         try:
             await message.bot.send_message(
@@ -88,10 +102,10 @@ async def ticket_message_received(message: Message, state: FSMContext):
                 f"🎫 **تیکت جدید #{ticket_id}**\n"
                 f"از: {message.from_user.full_name} (ID: {message.from_user.id})\n"
                 f"عنوان: {subject}\n"
-                f"برای مشاهده: /ticket_view {ticket_id}"
+                f"برای مشاهده، به بخش مدیریت تیکت‌ها بروید."
             )
-        except:
-            pass
+        except Exception as e:
+            logger.error(f"Failed to notify admin {admin_id}: {e}")
     
     await message.answer(
         f"✅ تیکت شما با شماره #{ticket_id} ثبت شد.\n"
@@ -101,6 +115,7 @@ async def ticket_message_received(message: Message, state: FSMContext):
 # ================== مشاهده تیکت‌های من ==================
 @router.callback_query(F.data == "ticket_my_list")
 async def ticket_my_list(callback: CallbackQuery):
+    logger.info(f"User {callback.from_user.id} viewing their tickets")
     tickets = await db.get_user_tickets(callback.from_user.id)
     
     if not tickets:
@@ -129,6 +144,7 @@ async def ticket_my_list(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("ticket_view_"))
 async def ticket_view(callback: CallbackQuery):
     ticket_id = int(callback.data.split("_")[2])
+    logger.info(f"User {callback.from_user.id} viewing ticket #{ticket_id}")
     
     async with aiosqlite.connect(db.DB_PATH) as conn:
         async with conn.execute("SELECT * FROM tickets WHERE id = ?", (ticket_id,)) as cursor:
@@ -177,12 +193,21 @@ async def ticket_view(callback: CallbackQuery):
     await callback.message.answer("انتخاب کنید:", reply_markup=builder.as_markup())
     await callback.answer()
 
-# ================== پاسخ به تیکت ==================
+# ================== پاسخ به تیکت (بخش اصلی مشکل) ==================
 @router.callback_query(F.data.startswith("ticket_reply_"))
 async def ticket_reply(callback: CallbackQuery, state: FSMContext):
     ticket_id = int(callback.data.split("_")[2])
+    logger.info(f"Admin {callback.from_user.id} is replying to ticket #{ticket_id}")
+    
+    # بررسی دسترسی ادمین
+    if callback.from_user.id not in config.ADMIN_IDS:
+        await callback.answer("شما دسترسی ادمین ندارید!", show_alert=True)
+        return
+    
+    # ذخیره ticket_id در state
+    await state.update_data(ticket_id=ticket_id)
     await state.set_state(TicketStates.waiting_for_message)
-    await state.update_data(ticket_id=ticket_id, reply_mode=True)
+    
     await callback.message.edit_text(
         "✍️ پاسخ خود را وارد کنید (متن یا فایل):\n"
         "برای لغو، /cancel را بزنید."
@@ -191,12 +216,17 @@ async def ticket_reply(callback: CallbackQuery, state: FSMContext):
 
 @router.message(TicketStates.waiting_for_message)
 async def ticket_reply_received(message: Message, state: FSMContext):
+    logger.info(f"Received reply from user {message.from_user.id}")
+    
     data = await state.get_data()
     if 'ticket_id' not in data:
+        await state.clear()
+        await message.answer("خطا: اطلاعات تیکت یافت نشد. لطفاً دوباره از منوی تیکت اقدام کنید.")
         return
     
     ticket_id = data['ticket_id']
     
+    # ذخیره پیام در دیتابیس
     file_id = None
     if message.document:
         file_id = message.document.file_id
@@ -212,20 +242,29 @@ async def ticket_reply_received(message: Message, state: FSMContext):
     
     await state.clear()
     
-    if message.from_user.id in config.ADMIN_IDS:
-        async with aiosqlite.connect(db.DB_PATH) as conn:
-            async with conn.execute("SELECT user_id FROM tickets WHERE id = ?", (ticket_id,)) as cursor:
-                ticket = await cursor.fetchone()
-                if ticket:
-                    try:
-                        await message.bot.send_message(
-                            ticket[0],
-                            f"📨 پاسخ جدید برای تیکت #{ticket_id} دریافت شد.\nبرای مشاهده به بخش تیکت‌های من مراجعه کنید."
-                        )
-                    except:
-                        pass
+    # دریافت user_id صاحب تیکت
+    async with aiosqlite.connect(db.DB_PATH) as conn:
+        async with conn.execute("SELECT user_id FROM tickets WHERE id = ?", (ticket_id,)) as cursor:
+            ticket = await cursor.fetchone()
+            if ticket:
+                user_id = ticket[0]
+            else:
+                user_id = None
     
-    await message.answer("✅ پاسخ شما ثبت شد.")
+    # ارسال پیام به کاربر
+    if user_id:
+        try:
+            await message.bot.send_message(
+                user_id,
+                f"📨 پاسخ جدید برای تیکت #{ticket_id} دریافت شد.\n"
+                f"برای مشاهده، به بخش تیکت‌های من بروید."
+            )
+            logger.info(f"Notification sent to user {user_id}")
+        except Exception as e:
+            logger.error(f"Failed to notify user {user_id}: {e}")
+    
+    await message.answer("✅ پاسخ شما با موفقیت ثبت و به کاربر ارسال شد.")
+    logger.info(f"Reply saved for ticket #{ticket_id}")
 
 # ================== تغییر وضعیت تیکت (فقط ادمین) ==================
 @router.callback_query(F.data.startswith("ticket_status_"))
@@ -238,8 +277,11 @@ async def ticket_status_change(callback: CallbackQuery):
     ticket_id = int(parts[2])
     new_status = parts[3]
     
+    logger.info(f"Admin {callback.from_user.id} changed ticket #{ticket_id} status to {new_status}")
+    
     await db.update_ticket_status(ticket_id, new_status)
     
+    # اطلاع به کاربر
     async with aiosqlite.connect(db.DB_PATH) as conn:
         async with conn.execute("SELECT user_id FROM tickets WHERE id = ?", (ticket_id,)) as cursor:
             ticket = await cursor.fetchone()
@@ -250,8 +292,8 @@ async def ticket_status_change(callback: CallbackQuery):
                         ticket[0],
                         f"🔄 وضعیت تیکت #{ticket_id} به «{status_text}» تغییر یافت."
                     )
-                except:
-                    pass
+                except Exception as e:
+                    logger.error(f"Failed to notify user: {e}")
     
     await callback.answer("✅ وضعیت تیکت به‌روزرسانی شد.")
     await ticket_view(callback)
@@ -263,6 +305,7 @@ async def ticket_admin(callback: CallbackQuery):
         await callback.answer("دسترسی ندارید!", show_alert=True)
         return
     
+    logger.info(f"Admin {callback.from_user.id} opened admin panel")
     tickets = await db.get_all_tickets()
     
     if not tickets:
@@ -285,10 +328,10 @@ async def ticket_admin(callback: CallbackQuery):
     for t in tickets[:10]:
         status_emoji = "🟢" if t[3] == "open" else "🟡" if t[3] == "in_progress" else "🔴"
         text += f"{status_emoji} #{t[0]}: {t[2]} (کاربر {t[1]})\n"
+        builder.button(text=f"#{t[0]}", callback_data=f"ticket_view_{t[0]}")
     
-    builder.button(text="📋 لیست کامل", callback_data="ticket_admin_list")
+    builder.adjust(3)
     builder.button(text="🔙 بازگشت", callback_data="menu_ticket")
-    builder.adjust(1)
     
     await callback.message.edit_text(text, reply_markup=builder.as_markup())
     await callback.answer()
@@ -298,6 +341,7 @@ async def ticket_admin_list(callback: CallbackQuery):
     if callback.from_user.id not in config.ADMIN_IDS:
         return
     
+    logger.info(f"Admin {callback.from_user.id} viewing full ticket list")
     tickets = await db.get_all_tickets()
     text = "📋 **لیست تمام تیکت‌ها**\n\n"
     builder = InlineKeyboardBuilder()
@@ -318,5 +362,6 @@ async def cancel_handler(message: Message, state: FSMContext):
     current_state = await state.get_state()
     if current_state is None:
         return
+    logger.info(f"User {message.from_user.id} cancelled operation")
     await state.clear()
     await message.answer("❌ عملیات لغو شد.")
