@@ -13,18 +13,19 @@ import keep_alive
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- تعریف یک استثنا برای خروج از حلقه Polling ---
-class PollingStop(Exception):
-    pass
+# Flag برای کنترل خروج از حلقه
+should_stop = False
 
-# --- Handler جدید برای سیگنال SIGTERM ---
 def signal_handler(sig, frame):
+    global should_stop
     logger.warning(f"Received signal {sig}, stopping polling gracefully...")
-    # با پرتاب این استثنا، حلقه while آن را گرفته و دوباره شروع می‌کند
-    raise PollingStop("SIGTERM received")
+    should_stop = True
+    # با این کار حلقه asyncio را مجبور به توقف می‌کنیم
+    raise KeyboardInterrupt()
 
-# ثبت handler برای سیگنال SIGTERM
+# ثبت handler برای سیگنال‌ها
 signal.signal(signal.SIGTERM, signal_handler)
+signal.signal(signal.SIGINT, signal_handler)
 
 async def set_commands(bot: Bot):
     commands = [
@@ -37,7 +38,8 @@ async def set_commands(bot: Bot):
     await bot.set_my_commands(commands)
 
 async def main_loop():
-    while True:
+    global should_stop
+    while not should_stop:
         try:
             logger.info("🚀 Starting keep-alive server...")
             keep_alive.start_server()
@@ -65,20 +67,21 @@ async def main_loop():
             await set_commands(bot)
             
             logger.info("✅ Starting polling...")
-            # غیرفعال کردن مدیریت سیگنال توسط aiogram
             await dp.start_polling(bot, handle_signals=False)
             
-        except PollingStop:
+        except KeyboardInterrupt:
+            # این استثنا توسط signal_handler پرتاب می‌شود
             logger.info("🔄 Polling stopped by signal. Restarting...")
-            # در اینجا نیازی به sleep نیست، چون حلقه while دوباره اجرا می‌شود
+            # فلگ should_stop را ریست می‌کنیم تا حلقه دوباره اجرا شود
+            should_stop = False
             continue
         except Exception as e:
             logger.error(f"❌ Polling stopped with error: {e}\n{traceback.format_exc()}")
             logger.info("🔄 Restarting in 5 seconds due to error...")
             await asyncio.sleep(5)
         finally:
-            # اگر به هر دلیل حلقه شکست، ۵ ثانیه صبر کن و دوباره تلاش کن
-            if not isinstance(e, PollingStop):
+            # اگر به دلیل خطا یا سیگنال حلقه متوقف شد، ۵ ثانیه صبر کن و دوباره تلاش کن
+            if not should_stop:
                 logger.info("🔄 Restarting main loop...")
                 await asyncio.sleep(5)
 
