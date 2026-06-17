@@ -1,14 +1,16 @@
 import asyncio
 import logging
+import traceback
 from aiogram import Bot, Dispatcher
 from aiogram.types import BotCommand
 from config import BOT_TOKEN
-from handlers import start, proxy, v2ray, wireguard, dns, buy, support, admin, ticket  # ping حذف شد
+from handlers import start, proxy, v2ray, wireguard, dns, buy, support, admin, ticket
 from middlewares import CheckSubscriptionMiddleware
 from database import init_db
 import keep_alive
 
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 async def set_commands(bot: Bot):
     commands = [
@@ -21,26 +23,40 @@ async def set_commands(bot: Bot):
     await bot.set_my_commands(commands)
 
 async def main():
-    keep_alive.start_server()
-    await init_db()
-    bot = Bot(token=BOT_TOKEN)
-    dp = Dispatcher()
+    try:
+        logger.info("Starting keep-alive server...")
+        keep_alive.start_server()
+        
+        logger.info("Initializing database...")
+        await init_db()
+        
+        logger.info("Creating bot instance...")
+        bot = Bot(token=BOT_TOKEN)
+        dp = Dispatcher()
 
-    dp.message.middleware(CheckSubscriptionMiddleware())
-    dp.callback_query.middleware(CheckSubscriptionMiddleware())
+        dp.message.middleware(CheckSubscriptionMiddleware())
+        dp.callback_query.middleware(CheckSubscriptionMiddleware())
 
-    dp.include_router(start.router)
-    dp.include_router(proxy.router)
-    dp.include_router(v2ray.router)
-    dp.include_router(wireguard.router)
-    dp.include_router(dns.router)
-    dp.include_router(buy.router)
-    dp.include_router(support.router)
-    dp.include_router(admin.router)
-    dp.include_router(ticket.router)  # روت تیکت
+        dp.include_router(start.router)
+        dp.include_router(proxy.router)
+        dp.include_router(v2ray.router)
+        dp.include_router(wireguard.router)
+        dp.include_router(dns.router)
+        dp.include_router(buy.router)
+        dp.include_router(support.router)
+        dp.include_router(admin.router)
+        dp.include_router(ticket.router)
 
-    await set_commands(bot)
-    await dp.start_polling(bot)
+        await set_commands(bot)
+        
+        logger.info("Starting polling...")
+        await dp.start_polling(bot)
+        
+    except Exception as e:
+        logger.error(f"Fatal error in main: {e}\n{traceback.format_exc()}")
+        # در صورت بروز خطا، بعد از ۵ ثانیه دوباره تلاش کن (اختیاری)
+        await asyncio.sleep(5)
+        # می‌توانید اینجا دوباره main را فراخوانی کنید (اما بهتر است در حلقه while باشد)
 
 if __name__ == "__main__":
     asyncio.run(main())
