@@ -7,10 +7,10 @@ from config import BOT_TOKEN, CHANNEL_ID
 from database import *
 from middlewares import *
 
-# اتصال به توکن ربات از طریق متغیرهای محیطی رندر
+# اتصال به ربات از طریق توکن ست شده در رندر
 bot = telebot.TeleBot(os.getenv('BOT_TOKEN', BOT_TOKEN))
 
-# تلاش برای ساخت دیتابیس
+# تلاش برای ساخت و تنظیم دیتابیس
 try:
     create_db()
 except NameError:
@@ -19,15 +19,18 @@ except NameError:
     except NameError:
         pass
 
-# لود کردن خودکار هندلرها
-try:
-    from handlers import start, proxy, v2ray, wireguard, dns, buy, support, admin, ticket
-    for handler in [start, proxy, v2ray, wireguard, dns, buy, support, admin, ticket]:
-        if hasattr(handler, 'register_handlers'):
-            handler.register_handlers(bot)
-except Exception as e:
-    print(f"Note on handlers: {e}")
+# --- اتصال و فعال‌سازی مستقیم هندلرها بدون ارور کرش ---
+import handlers.start
+import handlers.proxy
+import handlers.v2ray
+import handlers.wireguard
+import handlers.dns
+import handlers.buy
+import handlers.support
+import handlers.admin
+import handlers.ticket
 
 if __name__ == "__main__":
     print("--- Robot Started Successfully on Render! ---")
+    # زمان انتظار طولانی‌تر برای پایداری در اینترنت‌های ضعیف
     bot.infinity_polling(timeout=60, long_polling_timeout=60)
