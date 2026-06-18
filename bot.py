@@ -8,8 +8,7 @@ from config import BOT_TOKEN
 from handlers import start, proxy, v2ray, wireguard, dns, buy, support, admin, ticket
 from middlewares import CheckSubscriptionMiddleware
 from database import init_db
-import keep_alive
-from aiohttp import web  # برای Health Check
+from aiohttp import web
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -34,8 +33,7 @@ def signal_handler(sig, frame):
     global stop_flag
     logger.warning(f"Received signal {sig}, stopping gracefully...")
     stop_flag = True
-    # پرتاب CancelledError برای خروج از asyncio
-    raise asyncio.CancelledError()
+    raise KeyboardInterrupt()
 
 signal.signal(signal.SIGTERM, signal_handler)
 signal.signal(signal.SIGINT, signal_handler)
@@ -60,9 +58,6 @@ async def main_loop():
     
     while not stop_flag:
         try:
-            logger.info("🚀 Starting keep-alive server...")
-            keep_alive.start_server()
-            
             logger.info("📂 Initializing database...")
             await init_db()
             
@@ -88,9 +83,10 @@ async def main_loop():
             logger.info("✅ Starting polling...")
             await dp.start_polling(bot, handle_signals=False)
             
-        except asyncio.CancelledError:
-            logger.info("🔄 Polling cancelled by signal. Restarting...")
-            # حلقه دوباره اجرا می‌شود
+        except KeyboardInterrupt:
+            logger.info("🔄 Polling stopped by signal. Restarting...")
+            # فلگ را ریست می‌کنیم تا دوباره اجرا شود
+            stop_flag = False
             continue
         except Exception as e:
             logger.error(f"❌ Polling stopped with error: {e}\n{traceback.format_exc()}")
