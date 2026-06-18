@@ -2,6 +2,7 @@ import asyncio
 import logging
 import traceback
 import signal
+import sys
 from aiogram import Bot, Dispatcher
 from aiogram.types import BotCommand
 from config import BOT_TOKEN
@@ -27,13 +28,12 @@ async def start_health_server():
     logger.info("✅ Health check server running on port 10000")
 
 # ========== مدیریت سیگنال ==========
-stop_flag = False
+stop_polling = False
 
 def signal_handler(sig, frame):
-    global stop_flag
-    logger.warning(f"Received signal {sig}, stopping gracefully...")
-    stop_flag = True
-    raise KeyboardInterrupt()
+    global stop_polling
+    logger.warning(f"Received signal {sig}, stopping polling gracefully...")
+    stop_polling = True
 
 signal.signal(signal.SIGTERM, signal_handler)
 signal.signal(signal.SIGINT, signal_handler)
@@ -49,14 +49,11 @@ async def set_commands(bot: Bot):
     ]
     await bot.set_my_commands(commands)
 
-# ========== حلقه اصلی ==========
-async def main_loop():
-    global stop_flag
+# ========== اجرای ربات ==========
+async def run_bot():
+    global stop_polling
     
-    # راه‌اندازی Health Check در پس‌زمینه
-    asyncio.create_task(start_health_server())
-    
-    while not stop_flag:
+    while True:
         try:
             logger.info("📂 Initializing database...")
             await init_db()
@@ -80,22 +77,45 @@ async def main_loop():
 
             await set_commands(bot)
             
-            logger.info("✅ Starting polling...")
-            await dp.start_polling(bot, handle_signals=False)
+            # راه‌اندازی Health Check
+            asyncio.create_task(start_health_server())
             
-        except KeyboardInterrupt:
-            logger.info("🔄 Polling stopped by signal. Restarting...")
-            # فلگ را ریست می‌کنیم تا دوباره اجرا شود
-            stop_flag = False
-            continue
+            logger.info("✅ Starting polling...")
+            # شروع Polling بدون مدیریت سیگنال
+            polling_task = asyncio.create_task(dp.start_polling(bot, handle_signals=False))
+            
+            # منتظر می‌مانیم تا سیگنال یا خطا رخ دهد
+            while not stop_polling:
+                await asyncio.sleep(1)
+            
+            # دریافت SIGTERM: متوقف کردن Polling
+            logger.info("🛑 Stopping polling due to signal...")
+            polling_task.cancel()
+            try:
+                await polling_task
+            except asyncio.CancelledError:
+                pass
+            
+            # ریست کردن فلگ برای دفعه بعد
+            stop_polling = False
+            
+            # بستن اتصال بات
+            await bot.session.close()
+            
+            logger.info("🔄 Restarting in 2 seconds...")
+            await asyncio.sleep(2)
+            
         except Exception as e:
-            logger.error(f"❌ Polling stopped with error: {e}\n{traceback.format_exc()}")
+            logger.error(f"❌ Critical error: {e}\n{traceback.format_exc()}")
             logger.info("🔄 Restarting in 5 seconds due to error...")
             await asyncio.sleep(5)
-        finally:
-            if not stop_flag:
-                logger.info("🔄 Restarting main loop...")
-                await asyncio.sleep(2)
 
+# ========== نقطه ورود ==========
 if __name__ == "__main__":
-    asyncio.run(main_loop())
+    try:
+        asyncio.run(run_bot())
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by user.")
+    except Exception as e:
+        logger.error(f"Fatal error: {e}")
+        sys.exit(1)
