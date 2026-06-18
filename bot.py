@@ -49,7 +49,7 @@ async def set_commands(bot: Bot):
     ]
     await bot.set_my_commands(commands)
 
-# ========== ساخت یک‌باره دیسپچر و روت‌ها ==========
+# ========== ساخت یک‌باره دیسپچر ==========
 async def build_dispatcher():
     dp = Dispatcher()
     
@@ -80,18 +80,17 @@ async def main():
     # مقداردهی اولیه دیتابیس
     await init_db()
     
-    # ساخت بات و دیسپچر
+    # ساخت بات و دیسپچر (فقط یک بار)
     bot = Bot(token=BOT_TOKEN)
     dp = await build_dispatcher()
     await set_commands(bot)
-    
     logger.info("✅ Bot and dispatcher initialized.")
     
     # حلقه اصلی برای مدیریت Polling
     while True:
         try:
             logger.info("✅ Starting polling...")
-            # شروع Polling بدون مدیریت سیگنال (خودمان مدیریت می‌کنیم)
+            # شروع Polling بدون مدیریت سیگنال
             polling_task = asyncio.create_task(dp.start_polling(bot, handle_signals=False))
             
             # منتظر سیگنال یا خطا
@@ -113,9 +112,12 @@ async def main():
             await asyncio.sleep(2)
             
         except Exception as e:
-            logger.error(f"❌ Critical error in polling loop: {e}\n{traceback.format_exc()}")
+            # مدیریت خطاهای ناگهانی (مانند SSL)
+            logger.error(f"❌ Polling crashed: {e}\n{traceback.format_exc()}")
             logger.info("🔄 Restarting polling in 5 seconds due to error...")
             await asyncio.sleep(5)
+            # در صورت بروز خطا، فلگ را ریست می‌کنیم
+            stop_polling = False
 
 # ========== نقطه ورود ==========
 if __name__ == "__main__":
