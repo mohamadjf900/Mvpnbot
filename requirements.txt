@@ -4,3 +4,4 @@ aiohttp==3.9.1
 qrcode[pil]==7.4.2
 Pillow==10.1.0
 flask
+requests
