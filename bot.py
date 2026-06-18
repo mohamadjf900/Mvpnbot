@@ -1,6 +1,54 @@
+import asyncio
+import logging
 import os
-import telebot
+from aiogram import Bot, Dispatcher
+from aiogram.types import BotCommand
 from config import BOT_TOKEN
+from handlers import start, proxy, v2ray, wireguard, dns, buy, support, admin
+from middlewares import CheckSubscriptionMiddleware
+from database import init_db
+from utils.proxy_updater import update_proxies_periodically
 
-# این فایل فقط متغیر ربات را برای هندلرها آماده نگه می‌دارد تا چرخه ایمپورت شکسته شود
-bot = telebot.TeleBot(os.getenv('BOT_TOKEN', BOT_TOKEN))
+logging.basicConfig(level=logging.INFO)
+
+async def set_commands(bot: Bot):
+    commands = [
+        BotCommand(command="start", description="شروع مجدد"),
+        BotCommand(command="stats", description="آمار (فقط ادمین)"),
+        BotCommand(command="broadcast", description="ارسال همگانی (ادمین)"),
+    ]
+    await bot.set_my_commands(commands)
+
+async def main():
+    # راه‌اندازی دیتابیس آیو‌اس‌کیوال لایت
+    await init_db()
+    
+    # خواندن توکن از محیط رندر یا کانفیگ
+    token = os.getenv("BOT_TOKEN", BOT_TOKEN)
+    bot = Bot(token=token)
+    dp = Dispatcher()
+
+    # فعال‌سازی میدلور جوین اجباری کانال شما
+    dp.message.middleware(CheckSubscriptionMiddleware())
+    dp.callback_query.middleware(CheckSubscriptionMiddleware())
+
+    # اتصال تمام روترهای پوشه handlers به دیسپچر اصلی
+    dp.include_router(start.router)
+    dp.include_router(proxy.router)
+    dp.include_router(v2ray.router)
+    dp.include_router(wireguard.router)
+    dp.include_router(dns.router)
+    dp.include_router(buy.router)
+    dp.include_router(support.router)
+    dp.include_router(admin.router)
+
+    await set_commands(bot)
+
+    # اجرای آپدیتر پروکسی‌ها در پس‌زمینه
+    asyncio.create_task(update_proxies_periodically())
+
+    print("--- Aiogram Bot is Polling Now! ---")
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
