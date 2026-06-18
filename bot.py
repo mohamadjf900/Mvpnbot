@@ -49,46 +49,56 @@ async def set_commands(bot: Bot):
     ]
     await bot.set_my_commands(commands)
 
+# ========== ساخت یک‌باره دیسپچر و روت‌ها ==========
+async def build_dispatcher():
+    dp = Dispatcher()
+    
+    # اضافه کردن Middleware
+    dp.message.middleware(CheckSubscriptionMiddleware())
+    dp.callback_query.middleware(CheckSubscriptionMiddleware())
+    
+    # اضافه کردن روت‌ها (فقط یک بار)
+    dp.include_router(start.router)
+    dp.include_router(proxy.router)
+    dp.include_router(v2ray.router)
+    dp.include_router(wireguard.router)
+    dp.include_router(dns.router)
+    dp.include_router(buy.router)
+    dp.include_router(support.router)
+    dp.include_router(admin.router)
+    dp.include_router(ticket.router)
+    
+    return dp
+
 # ========== اجرای ربات ==========
-async def run_bot():
+async def main():
     global stop_polling
     
+    # راه‌اندازی Health Check (یک بار در ابتدا)
+    await start_health_server()
+    
+    # مقداردهی اولیه دیتابیس
+    await init_db()
+    
+    # ساخت بات و دیسپچر
+    bot = Bot(token=BOT_TOKEN)
+    dp = await build_dispatcher()
+    await set_commands(bot)
+    
+    logger.info("✅ Bot and dispatcher initialized.")
+    
+    # حلقه اصلی برای مدیریت Polling
     while True:
         try:
-            logger.info("📂 Initializing database...")
-            await init_db()
-            
-            logger.info("🤖 Creating bot instance...")
-            bot = Bot(token=BOT_TOKEN)
-            dp = Dispatcher()
-
-            dp.message.middleware(CheckSubscriptionMiddleware())
-            dp.callback_query.middleware(CheckSubscriptionMiddleware())
-
-            dp.include_router(start.router)
-            dp.include_router(proxy.router)
-            dp.include_router(v2ray.router)
-            dp.include_router(wireguard.router)
-            dp.include_router(dns.router)
-            dp.include_router(buy.router)
-            dp.include_router(support.router)
-            dp.include_router(admin.router)
-            dp.include_router(ticket.router)
-
-            await set_commands(bot)
-            
-            # راه‌اندازی Health Check
-            asyncio.create_task(start_health_server())
-            
             logger.info("✅ Starting polling...")
-            # شروع Polling بدون مدیریت سیگنال
+            # شروع Polling بدون مدیریت سیگنال (خودمان مدیریت می‌کنیم)
             polling_task = asyncio.create_task(dp.start_polling(bot, handle_signals=False))
             
-            # منتظر می‌مانیم تا سیگنال یا خطا رخ دهد
+            # منتظر سیگنال یا خطا
             while not stop_polling:
-                await asyncio.sleep(1)
+                await asyncio.sleep(0.5)
             
-            # دریافت SIGTERM: متوقف کردن Polling
+            # دریافت SIGTERM: توقف Polling
             logger.info("🛑 Stopping polling due to signal...")
             polling_task.cancel()
             try:
@@ -96,24 +106,21 @@ async def run_bot():
             except asyncio.CancelledError:
                 pass
             
-            # ریست کردن فلگ برای دفعه بعد
+            # ریست فلگ
             stop_polling = False
             
-            # بستن اتصال بات
-            await bot.session.close()
-            
-            logger.info("🔄 Restarting in 2 seconds...")
+            logger.info("🔄 Restarting polling in 2 seconds...")
             await asyncio.sleep(2)
             
         except Exception as e:
-            logger.error(f"❌ Critical error: {e}\n{traceback.format_exc()}")
-            logger.info("🔄 Restarting in 5 seconds due to error...")
+            logger.error(f"❌ Critical error in polling loop: {e}\n{traceback.format_exc()}")
+            logger.info("🔄 Restarting polling in 5 seconds due to error...")
             await asyncio.sleep(5)
 
 # ========== نقطه ورود ==========
 if __name__ == "__main__":
     try:
-        asyncio.run(run_bot())
+        asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("Bot stopped by user.")
     except Exception as e:
