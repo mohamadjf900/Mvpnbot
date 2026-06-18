@@ -9,24 +9,38 @@ from handlers import start, proxy, v2ray, wireguard, dns, buy, support, admin, t
 from middlewares import CheckSubscriptionMiddleware
 from database import init_db
 import keep_alive
+from aiohttp import web  # برای Health Check
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Flag برای کنترل خروج از حلقه
-should_stop = False
+# ========== Health Check ==========
+async def health_check(request):
+    return web.Response(text="OK")
+
+async def start_health_server():
+    app = web.Application()
+    app.router.add_get('/health', health_check)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', 10000)
+    await site.start()
+    logger.info("✅ Health check server running on port 10000")
+
+# ========== مدیریت سیگنال ==========
+stop_flag = False
 
 def signal_handler(sig, frame):
-    global should_stop
-    logger.warning(f"Received signal {sig}, stopping polling gracefully...")
-    should_stop = True
-    # با این کار حلقه asyncio را مجبور به توقف می‌کنیم
-    raise KeyboardInterrupt()
+    global stop_flag
+    logger.warning(f"Received signal {sig}, stopping gracefully...")
+    stop_flag = True
+    # پرتاب CancelledError برای خروج از asyncio
+    raise asyncio.CancelledError()
 
-# ثبت handler برای سیگنال‌ها
 signal.signal(signal.SIGTERM, signal_handler)
 signal.signal(signal.SIGINT, signal_handler)
 
+# ========== دستورات ربات ==========
 async def set_commands(bot: Bot):
     commands = [
         BotCommand(command="start", description="شروع مجدد"),
@@ -37,9 +51,14 @@ async def set_commands(bot: Bot):
     ]
     await bot.set_my_commands(commands)
 
+# ========== حلقه اصلی ==========
 async def main_loop():
-    global should_stop
-    while not should_stop:
+    global stop_flag
+    
+    # راه‌اندازی Health Check در پس‌زمینه
+    asyncio.create_task(start_health_server())
+    
+    while not stop_flag:
         try:
             logger.info("🚀 Starting keep-alive server...")
             keep_alive.start_server()
@@ -69,21 +88,18 @@ async def main_loop():
             logger.info("✅ Starting polling...")
             await dp.start_polling(bot, handle_signals=False)
             
-        except KeyboardInterrupt:
-            # این استثنا توسط signal_handler پرتاب می‌شود
-            logger.info("🔄 Polling stopped by signal. Restarting...")
-            # فلگ should_stop را ریست می‌کنیم تا حلقه دوباره اجرا شود
-            should_stop = False
+        except asyncio.CancelledError:
+            logger.info("🔄 Polling cancelled by signal. Restarting...")
+            # حلقه دوباره اجرا می‌شود
             continue
         except Exception as e:
             logger.error(f"❌ Polling stopped with error: {e}\n{traceback.format_exc()}")
             logger.info("🔄 Restarting in 5 seconds due to error...")
             await asyncio.sleep(5)
         finally:
-            # اگر به دلیل خطا یا سیگنال حلقه متوقف شد، ۵ ثانیه صبر کن و دوباره تلاش کن
-            if not should_stop:
+            if not stop_flag:
                 logger.info("🔄 Restarting main loop...")
-                await asyncio.sleep(5)
+                await asyncio.sleep(2)
 
 if __name__ == "__main__":
     asyncio.run(main_loop())
