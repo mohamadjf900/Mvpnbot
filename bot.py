@@ -29,11 +29,13 @@ async def start_health_server():
 
 # ========== مدیریت سیگنال ==========
 stop_polling = False
+restart_event = asyncio.Event()
 
 def signal_handler(sig, frame):
     global stop_polling
     logger.warning(f"Received signal {sig}, stopping polling gracefully...")
     stop_polling = True
+    restart_event.set()
 
 signal.signal(signal.SIGTERM, signal_handler)
 signal.signal(signal.SIGINT, signal_handler)
@@ -53,11 +55,9 @@ async def set_commands(bot: Bot):
 async def build_dispatcher():
     dp = Dispatcher()
     
-    # اضافه کردن Middleware
     dp.message.middleware(CheckSubscriptionMiddleware())
     dp.callback_query.middleware(CheckSubscriptionMiddleware())
     
-    # اضافه کردن روت‌ها (فقط یک بار)
     dp.include_router(start.router)
     dp.include_router(proxy.router)
     dp.include_router(v2ray.router)
@@ -74,52 +74,54 @@ async def build_dispatcher():
 async def main():
     global stop_polling
     
-    # راه‌اندازی Health Check (یک بار در ابتدا)
     await start_health_server()
-    
-    # مقداردهی اولیه دیتابیس
     await init_db()
     
-    # ساخت بات و دیسپچر (فقط یک بار)
     bot = Bot(token=BOT_TOKEN)
     dp = await build_dispatcher()
     await set_commands(bot)
     logger.info("✅ Bot and dispatcher initialized.")
     
-    # حلقه اصلی برای مدیریت Polling
     while True:
         try:
             logger.info("✅ Starting polling...")
-            # شروع Polling بدون مدیریت سیگنال
             polling_task = asyncio.create_task(dp.start_polling(bot, handle_signals=False))
             
-            # منتظر سیگنال یا خطا
-            while not stop_polling:
-                await asyncio.sleep(0.5)
+            # منتظر سیگنال یا Event
+            await restart_event.wait()
             
-            # دریافت SIGTERM: توقف Polling
-            logger.info("🛑 Stopping polling due to signal...")
+            # توقف polling
+            logger.info("🛑 Stopping polling...")
             polling_task.cancel()
             try:
                 await polling_task
             except asyncio.CancelledError:
                 pass
             
-            # ریست فلگ
-            stop_polling = False
+            # بستن کامل session بات
+            await bot.session.close()
+            logger.info("✅ Bot session closed.")
             
-            logger.info("🔄 Restarting polling in 2 seconds...")
-            await asyncio.sleep(2)
+            # ایجاد session جدید
+            bot = Bot(token=BOT_TOKEN)
+            logger.info("✅ New bot session created.")
+            
+            # ریست فلگ و Event
+            stop_polling = False
+            restart_event.clear()
+            
+            # تأخیر ۵ ثانیه برای اطمینان از بسته شدن کامل اتصال قبلی
+            logger.info("🔄 Waiting 5 seconds before restart...")
+            await asyncio.sleep(5)
             
         except Exception as e:
-            # مدیریت خطاهای ناگهانی (مانند SSL)
-            logger.error(f"❌ Polling crashed: {e}\n{traceback.format_exc()}")
-            logger.info("🔄 Restarting polling in 5 seconds due to error...")
+            logger.error(f"❌ Critical error: {e}\n{traceback.format_exc()}")
+            logger.info("🔄 Restarting in 5 seconds due to error...")
             await asyncio.sleep(5)
-            # در صورت بروز خطا، فلگ را ریست می‌کنیم
+            # ریست Event و فلگ
             stop_polling = False
+            restart_event.clear()
 
-# ========== نقطه ورود ==========
 if __name__ == "__main__":
     try:
         asyncio.run(main())
