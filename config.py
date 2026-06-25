@@ -2,8 +2,11 @@ import os
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8389885213:AAG4WUqbtwOZOG8lYO-hf95WcX2nt0h_BPk")
 ADMIN_IDS = list(map(int, os.getenv("ADMIN_IDS", "765318133").split(',')))
-CHANNEL_ID = int(os.getenv("CHANNEL_ID", "--1003730654738"))
-CHANNEL_LINK = os.getenv("CHANNEL_LINK", "https://https://t.me/mvpni7")
+
+# 📢 لیست کانال‌های عضویت اجباری (میتوانی بعداً کانال‌های تبلیغاتی را هم اینجا اضافه کنی)
+REQUIRED_CHANNELS = [
+    {"id": -1003730654738, "link": "https://https://t.me/mvpni7", "name": "📢 کانال اصلی ما"},
+   ]
 
 DNS_LIST = [
     {"name": "Google", "primary": "8.8.8.8", "secondary": "8.8.4.4", "for_gaming": False},
