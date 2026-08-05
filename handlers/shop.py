@@ -22,7 +22,7 @@ def services_kb():
     ]
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
-# ========== دکمه عادی (نمایش پلن‌ها با دکمه‌های Inline) ==========
+# ========== دکمه عادی ==========
 @router.message(F.text == "📦 عادی")
 async def normal_plans(message: Message):
     plans = await db.get_normal_plans()
@@ -40,7 +40,6 @@ async def normal_plans(message: Message):
             callback_data=f"buy_normal_{plan_id}"
         )])
     
-    # دکمه بازگشت
     buttons.append([InlineKeyboardButton(text="🔙 بازگشت", callback_data="back_to_services")])
     
     await message.answer(
@@ -48,7 +47,7 @@ async def normal_plans(message: Message):
         reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
     )
 
-# ========== دکمه ویژه (نمایش پلن‌ها با دکمه‌های Inline) ==========
+# ========== دکمه ویژه ==========
 @router.message(F.text == "⭐ ویژه")
 async def vip_plans(message: Message):
     plans = await db.get_vip_plans()
@@ -92,7 +91,7 @@ async def back_to_main(message: Message):
     from handlers.start import main_menu_keyboard
     await message.answer("منوی اصلی:", reply_markup=main_menu_keyboard(message.from_user.id))
 
-# ========== خرید عادی (Callback) ==========
+# ========== خرید عادی ==========
 @router.callback_query(F.data.startswith("buy_normal_"))
 async def buy_normal_callback(callback: CallbackQuery, state: FSMContext):
     plan_id = int(callback.data.split("_")[2])
@@ -129,7 +128,7 @@ async def buy_normal_callback(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BuyStates.waiting_for_receipt)
     await callback.answer()
 
-# ========== خرید ویژه (Callback) ==========
+# ========== خرید ویژه ==========
 @router.callback_query(F.data.startswith("buy_vip_"))
 async def buy_vip_callback(callback: CallbackQuery, state: FSMContext):
     plan_id = int(callback.data.split("_")[2])
@@ -177,7 +176,6 @@ async def receive_receipt(message: Message, state: FSMContext):
     
     file_id = message.photo[-1].file_id
     
-    # ایجاد سفارش
     order_id = await db.create_order(
         user_id=message.from_user.id,
         username=message.from_user.username,
@@ -190,7 +188,6 @@ async def receive_receipt(message: Message, state: FSMContext):
     await db.update_order_receipt(order_id, file_id)
     await state.clear()
     
-    # اطلاع به ادمین
     for admin_id in config.ADMIN_IDS:
         try:
             await message.bot.send_photo(
@@ -223,44 +220,6 @@ async def invalid_receipt(message: Message):
         "❌ لطفاً یک عکس از رسید پرداخت ارسال کنید.",
         reply_markup=services_kb()
     )
-
-# ========== دستورات خرید به‌عنوان Command (اختیاری) ==========
-@router.message(Command("buy_normal_"))
-async def buy_normal_command(message: Message, state: FSMContext):
-    # همانند کالبک، اما برای کاربرانی که دستور تایپ می‌کنند
-    try:
-        plan_id = int(message.text.split("_")[2])
-        plan = await db.get_normal_plan(plan_id)
-        if not plan:
-            await message.answer("❌ پلن یافت نشد!", reply_markup=services_kb())
-            return
-        # ادامه مثل کالبک
-        plan_name = f"{plan[1]} گیگ (عادی)"
-        price = plan[2]
-        await state.update_data(plan_id=plan_id, plan_name=plan_name, price=price, service_type="normal")
-        text = f"..."
-        await message.answer(text, reply_markup=services_kb())
-        await state.set_state(BuyStates.waiting_for_receipt)
-    except:
-        await message.answer("❌ خطا در پردازش دستور.", reply_markup=services_kb())
-
-@router.message(Command("buy_vip_"))
-async def buy_vip_command(message: Message, state: FSMContext):
-    # مشابه
-    try:
-        plan_id = int(message.text.split("_")[2])
-        plan = await db.get_vip_plan(plan_id)
-        if not plan:
-            await message.answer("❌ پلن یافت نشد!", reply_markup=services_kb())
-            return
-        plan_name = f"{plan[1]} (ویژه)"
-        price = plan[2]
-        await state.update_data(plan_id=plan_id, plan_name=plan_name, price=price, service_type="vip")
-        text = f"..."
-        await message.answer(text, reply_markup=services_kb())
-        await state.set_state(BuyStates.waiting_for_receipt)
-    except:
-        await message.answer("❌ خطا در پردازش دستور.", reply_markup=services_kb())
 
 # ========== کوپن تخفیف ==========
 @router.message(Command("coupon"))
