@@ -6,12 +6,12 @@ load_dotenv()
 # ========== تنظیمات اصلی ==========
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8389885213:AAG4WUqbtwOZOG8lYO-hf95WcX2nt0h_BPk")
 ADMIN_IDS = list(map(int, os.getenv("ADMIN_IDS", "765318133").split(',')))
-CHANNEL_ID = int(os.getenv("CHANNEL_ID", "-1003730654738"))  # اصلاح شد (دو - حذف شد)
-CHANNEL_LINK = os.getenv("CHANNEL_LINK", "https://t.me/mvpni7")  # اصلاح شد (تکراری حذف شد)
+CHANNEL_ID = int(os.getenv("CHANNEL_ID", "-1003730654738"))
+CHANNEL_LINK = os.getenv("CHANNEL_LINK", "https://t.me/mvpni7")
 
 # ========== اطلاعات برند و پشتیبانی ==========
 BRAND_NAME = os.getenv("BRAND_NAME", "Mvpn")
-SUPPORT_USERNAME = os.getenv("SUPPORT_USERNAME", "Mj054")  # بدون @
+SUPPORT_USERNAME = os.getenv("SUPPORT_USERNAME", "YourSupportUsername")  # بدون @
 
 # ========== تنظیمات دیتابیس ==========
 DB_PATH = os.getenv("DB_PATH", "bot.db")
@@ -21,19 +21,19 @@ REFERRAL_REQUIRED_COUNT = int(os.getenv("REFERRAL_REQUIRED_COUNT", "3"))
 REFERRAL_REWARD_VOLUME = int(os.getenv("REFERRAL_REWARD_VOLUME", "50"))
 
 # ========== پلن‌های پیش‌فرض ==========
-DEFAULT_GAMING_PLANS = [
-    (10, 70000),   # (حجم به گیگ, قیمت به تومان)
-    (20, 140000),
-    (30, 210000),
-    (40, 280000),
-    (50, 350000),
+# پلن‌های عادی (Normal)
+DEFAULT_NORMAL_PLANS = [
+    (10, 50000),   # (حجم به گیگ, قیمت به تومان)
+    (20, 100000),
+    (30, 150000),
+    (50, 250000),
 ]
 
-DEFAULT_MULTI_PLANS = [
-    ("تک کاربره نامحدود یکماهه", 150000),
-    ("دو کاربره نامحدود یکماهه", 250000),
-    ("تک کاربره نامحدود دوماهه", 250000),
-    ("دو کاربره نامحدود دوماهه", 450000),
+# پلن‌های ویژه (VIP)
+DEFAULT_VIP_PLANS = [
+    ("VIP یکماهه نامحدود", 200000),
+    ("VIP دوماهه نامحدود", 350000),
+    ("VIP سه‌ماهه نامحدود", 500000),
 ]
 
 # ========== تنظیمات DNS ==========
