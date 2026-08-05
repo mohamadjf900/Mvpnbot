@@ -24,7 +24,7 @@ def services_kb():
     ]
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
-# ========== دکمه عادی (نمایش پلن‌ها با دکمه‌های Inline) ==========
+# ========== دکمه عادی ==========
 @router.message(F.text == "📦 عادی")
 async def normal_plans(message: Message):
     try:
@@ -53,7 +53,7 @@ async def normal_plans(message: Message):
         logger.error(f"Error in normal_plans: {e}")
         await message.answer(f"❌ خطا در دریافت پلن‌ها: {e}", reply_markup=services_kb())
 
-# ========== دکمه ویژه (نمایش پلن‌ها با دکمه‌های Inline) ==========
+# ========== دکمه ویژه ==========
 @router.message(F.text == "⭐ ویژه")
 async def vip_plans(message: Message):
     try:
@@ -101,7 +101,7 @@ async def back_to_main(message: Message):
     from handlers.start import main_menu_keyboard
     await message.answer("منوی اصلی:", reply_markup=main_menu_keyboard(message.from_user.id))
 
-# ========== خرید عادی (Callback) ==========
+# ========== خرید عادی ==========
 @router.callback_query(F.data.startswith("buy_normal_"))
 async def buy_normal_callback(callback: CallbackQuery, state: FSMContext):
     try:
@@ -144,7 +144,7 @@ async def buy_normal_callback(callback: CallbackQuery, state: FSMContext):
         logger.error(f"Error in buy_normal_callback: {e}")
         await callback.answer(f"❌ خطا: {e}", show_alert=True)
 
-# ========== خرید ویژه (Callback) ==========
+# ========== خرید ویژه ==========
 @router.callback_query(F.data.startswith("buy_vip_"))
 async def buy_vip_callback(callback: CallbackQuery, state: FSMContext):
     try:
@@ -187,7 +187,7 @@ async def buy_vip_callback(callback: CallbackQuery, state: FSMContext):
         logger.error(f"Error in buy_vip_callback: {e}")
         await callback.answer(f"❌ خطا: {e}", show_alert=True)
 
-# ========== دریافت رسید ==========
+# ========== دریافت رسید و ثبت سفارش ==========
 @router.message(BuyStates.waiting_for_receipt, F.photo)
 async def receive_receipt(message: Message, state: FSMContext):
     try:
@@ -199,19 +199,32 @@ async def receive_receipt(message: Message, state: FSMContext):
         
         file_id = message.photo[-1].file_id
         
+        # ========== ثبت سفارش در دیتابیس ==========
         order_id = await db.create_order(
             user_id=message.from_user.id,
-            username=message.from_user.username,
-            full_name=message.from_user.full_name,
+            username=message.from_user.username or "Unknown",
+            full_name=message.from_user.full_name or "Unknown",
             plan_id=data.get('plan_id'),
             plan_name=data.get('plan_name'),
             price=data.get('price'),
             user_count=data.get('user_count', 1)
         )
         
+        if not order_id:
+            await message.answer("❌ خطا در ثبت سفارش! لطفاً دوباره تلاش کنید.", reply_markup=services_kb())
+            await state.clear()
+            return
+        
+        # به‌روزرسانی وضعیت سفارش به receipt_sent
         await db.update_order_receipt(order_id, file_id)
+        
+        # ========== لاگ ==========
+        logger.info(f"Order #{order_id} created by user {message.from_user.id}")
+        
         await state.clear()
         
+        # ========== اطلاع به ادمین ==========
+        admin_sent = False
         for admin_id in config.ADMIN_IDS:
             try:
                 await message.bot.send_photo(
@@ -221,26 +234,36 @@ async def receive_receipt(message: Message, state: FSMContext):
 🆕 **سفارش جدید!**
 
 🆔 شماره سفارش: #{order_id}
-👤 کاربر: {message.from_user.full_name} (@{message.from_user.username})
+👤 کاربر: {message.from_user.full_name} (@{message.from_user.username or 'unknown'})
 📦 سرویس: {data.get('plan_name')}
 👥 تعداد کاربران: {data.get('user_count', 1)} نفر
 💰 قیمت: {data.get('price'):,} تومان
+📌 وضعیت: در انتظار تأیید
 
 ✅ تأیید: /confirm_{order_id}
 ❌ رد: /reject_{order_id}
 📡 تحویل: /deliver_{order_id} اطلاعات پنل
 """
                 )
-            except:
-                pass
+                admin_sent = True
+            except Exception as e:
+                logger.error(f"Failed to send order to admin {admin_id}: {e}")
+        
+        if not admin_sent:
+            logger.warning(f"No admin received order #{order_id}")
         
         await message.answer(
-            "✅ رسید شما دریافت شد!\nسفارش شما برای تأیید به ادمین ارسال شد.",
+            "✅ رسید شما دریافت شد!\n"
+            f"🆔 شماره سفارش شما: #{order_id}\n\n"
+            "سفارش شما برای تأیید به ادمین ارسال شد.\n"
+            "به زودی نتیجه به شما اطلاع داده می‌شود.",
             reply_markup=services_kb()
         )
+        
     except Exception as e:
         logger.error(f"Error in receive_receipt: {e}")
-        await message.answer(f"❌ خطا: {e}", reply_markup=services_kb())
+        await message.answer(f"❌ خطا در ثبت سفارش: {e}", reply_markup=services_kb())
+        await state.clear()
 
 @router.message(BuyStates.waiting_for_receipt)
 async def invalid_receipt(message: Message):
