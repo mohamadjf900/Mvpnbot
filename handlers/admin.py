@@ -1,6 +1,7 @@
 from aiogram import Router, F
-from aiogram.types import Message, FSInputFile
-from aiogram.filters import Command
+from aiogram.types import Message, FSInputFile, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.filters import Command, StateFilter
+from aiogram.fsm.context import FSMContext
 import database as db
 import config
 import os
@@ -197,7 +198,7 @@ async def clear_wireguard(message: Message):
     await message.answer("✅ تمام کانفیگ‌های WireGuard حذف شدند.")
 
 # ============================================================
-# ====================== مدیریت سفارشات ======================
+# ====================== مدیریت سفارشات با دکمه‌های اینلاین ======================
 # ============================================================
 
 @router.message(Command("orders"))
@@ -222,85 +223,90 @@ async def list_orders(message: Message):
         logger.error(f"Error in orders command: {e}")
         await message.answer(f"❌ خطا در دریافت سفارشات: {e}")
 
-@router.message(Command("confirm_"))
-async def confirm_order(message: Message):
-    if not is_admin(message.from_user.id):
-        await message.answer("❌ شما دسترسی ادمین ندارید!")
+# ========== هندلرهای Callback برای دکمه‌های سفارش ==========
+
+@router.callback_query(F.data.startswith("confirm_order_"))
+async def confirm_order_callback(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ شما دسترسی ادمین ندارید!", show_alert=True)
         return
     
     try:
-        match = re.search(r'confirm_(\d+)', message.text)
-        if not match:
-            await message.answer("❌ فرمت: /confirm_<order_id>\nمثال: /confirm_2")
-            return
+        order_id = int(callback.data.split("_")[2])
+        logger.info(f"Admin {callback.from_user.id} confirmed order #{order_id} via inline button")
         
-        order_id = int(match.group(1))
-        logger.info(f"Admin {message.from_user.id} confirming order #{order_id}")
-        
+        # بررسی سفارش
         async with aiosqlite.connect(db.DB_PATH) as conn:
             cursor = await conn.execute("SELECT * FROM orders WHERE id = ?", (order_id,))
             order = await cursor.fetchone()
             if not order:
-                await message.answer(f"❌ سفارش #{order_id} یافت نشد!")
+                await callback.answer("❌ سفارش یافت نشد!", show_alert=True)
                 return
             
             current_status = order[9]
             if current_status not in ["pending", "receipt_sent"]:
-                await message.answer(f"❌ سفارش #{order_id} در وضعیت {current_status} است و قابل تأیید نیست!")
+                await callback.answer(f"❌ سفارش در وضعیت {current_status} است!", show_alert=True)
                 return
         
+        # تأیید سفارش
         await db.update_order_status(order_id, "confirmed")
-        await message.answer(f"✅ سفارش #{order_id} با موفقیت تأیید شد.")
         
+        # ویرایش پیام ادمین
+        await callback.message.edit_caption(
+            caption=f"{callback.message.caption}\n\n✅ **سفارش #{order_id} توسط ادمین تأیید شد.**",
+            reply_markup=None
+        )
+        await callback.answer("✅ سفارش تأیید شد!")
+        
+        # اطلاع به کاربر
         async with aiosqlite.connect(db.DB_PATH) as conn:
             cursor = await conn.execute("SELECT user_id FROM orders WHERE id = ?", (order_id,))
             row = await cursor.fetchone()
             if row:
                 try:
-                    await message.bot.send_message(
+                    await callback.bot.send_message(
                         row[0],
                         f"✅ **سفارش شما #{order_id} تأیید شد!**\n\n"
-                        f"به زودی اطلاعات پنل برای شما ارسال می‌شود.\n"
-                        f"لطفاً منتظر پیام بعدی باشید."
+                        f"به زودی اطلاعات پنل برای شما ارسال می‌شود."
                     )
                 except Exception as e:
                     logger.error(f"Failed to notify user: {e}")
         
     except Exception as e:
-        logger.error(f"Error confirming order: {e}")
-        await message.answer(f"❌ خطا در تأیید سفارش: {e}")
+        logger.error(f"Error in confirm_order_callback: {e}")
+        await callback.answer(f"❌ خطا: {e}", show_alert=True)
 
-@router.message(Command("reject_"))
-async def reject_order(message: Message):
-    if not is_admin(message.from_user.id):
-        await message.answer("❌ شما دسترسی ادمین ندارید!")
+@router.callback_query(F.data.startswith("reject_order_"))
+async def reject_order_callback(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ شما دسترسی ادمین ندارید!", show_alert=True)
         return
     
     try:
-        match = re.search(r'reject_(\d+)', message.text)
-        if not match:
-            await message.answer("❌ فرمت: /reject_<order_id>\nمثال: /reject_2")
-            return
-        
-        order_id = int(match.group(1))
-        logger.info(f"Admin {message.from_user.id} rejecting order #{order_id}")
+        order_id = int(callback.data.split("_")[2])
+        logger.info(f"Admin {callback.from_user.id} rejected order #{order_id} via inline button")
         
         async with aiosqlite.connect(db.DB_PATH) as conn:
             cursor = await conn.execute("SELECT * FROM orders WHERE id = ?", (order_id,))
             order = await cursor.fetchone()
             if not order:
-                await message.answer(f"❌ سفارش #{order_id} یافت نشد!")
+                await callback.answer("❌ سفارش یافت نشد!", show_alert=True)
                 return
         
         await db.update_order_status(order_id, "rejected")
-        await message.answer(f"❌ سفارش #{order_id} رد شد.")
+        
+        await callback.message.edit_caption(
+            caption=f"{callback.message.caption}\n\n❌ **سفارش #{order_id} توسط ادمین رد شد.**",
+            reply_markup=None
+        )
+        await callback.answer("❌ سفارش رد شد!")
         
         async with aiosqlite.connect(db.DB_PATH) as conn:
             cursor = await conn.execute("SELECT user_id FROM orders WHERE id = ?", (order_id,))
             row = await cursor.fetchone()
             if row:
                 try:
-                    await message.bot.send_message(
+                    await callback.bot.send_message(
                         row[0],
                         f"❌ **سفارش شما #{order_id} رد شد.**\n\n"
                         f"برای اطلاعات بیشتر با پشتیبانی تماس بگیرید."
@@ -309,62 +315,72 @@ async def reject_order(message: Message):
                     logger.error(f"Failed to notify user: {e}")
         
     except Exception as e:
-        logger.error(f"Error rejecting order: {e}")
-        await message.answer(f"❌ خطا در رد سفارش: {e}")
+        logger.error(f"Error in reject_order_callback: {e}")
+        await callback.answer(f"❌ خطا: {e}", show_alert=True)
 
-@router.message(Command("deliver_"))
-async def deliver_order(message: Message):
-    if not is_admin(message.from_user.id):
-        await message.answer("❌ شما دسترسی ادمین ندارید!")
+# ========== دکمه تحویل ==========
+@router.callback_query(F.data.startswith("deliver_order_"))
+async def deliver_order_callback(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ شما دسترسی ادمین ندارید!", show_alert=True)
         return
     
-    try:
-        match = re.search(r'deliver_(\d+)', message.text)
-        if not match:
-            await message.answer("❌ فرمت: /deliver_<order_id> <اطلاعات پنل>\nمثال: /deliver_2 لینک: ... یوزرنیم: ... پسورد: ...")
+    order_id = int(callback.data.split("_")[2])
+    
+    # بررسی اینکه سفارش تأیید شده باشد
+    async with aiosqlite.connect(db.DB_PATH) as conn:
+        cursor = await conn.execute("SELECT status FROM orders WHERE id = ?", (order_id,))
+        row = await cursor.fetchone()
+        if not row:
+            await callback.answer("❌ سفارش یافت نشد!", show_alert=True)
             return
-        
-        order_id = int(match.group(1))
-        parts = message.text.split(maxsplit=2)
-        if len(parts) < 2:
-            await message.answer("❌ لطفاً اطلاعات پنل را وارد کنید!\nمثال: /deliver_2 لینک: ... یوزرنیم: ... پسورد: ...")
+        if row[0] != "confirmed":
+            await callback.answer("❌ ابتدا سفارش را تأیید کنید!", show_alert=True)
             return
-        
-        panel_info = parts[1] if len(parts) == 2 else parts[1] + " " + parts[2] if len(parts) > 2 else ""
-        
-        if not panel_info:
-            await message.answer("❌ لطفاً اطلاعات پنل را وارد کنید!")
-            return
-        
-        logger.info(f"Admin {message.from_user.id} delivering order #{order_id}")
-        
-        async with aiosqlite.connect(db.DB_PATH) as conn:
-            cursor = await conn.execute("SELECT * FROM orders WHERE id = ?", (order_id,))
-            order = await cursor.fetchone()
-            if not order:
-                await message.answer(f"❌ سفارش #{order_id} یافت نشد!")
-                return
-        
-        await db.update_order_status(order_id, "delivered", panel_info)
-        await message.answer(f"✅ سفارش #{order_id} با موفقیت تحویل داده شد.")
-        
-        async with aiosqlite.connect(db.DB_PATH) as conn:
-            cursor = await conn.execute("SELECT user_id FROM orders WHERE id = ?", (order_id,))
-            row = await cursor.fetchone()
-            if row:
-                try:
-                    await message.bot.send_message(
-                        row[0],
-                        f"🚀 **سفارش شما #{order_id} تحویل داده شد!**\n\n"
-                        f"📡 **اطلاعات پنل:**\n{panel_info}\n\n"
-                        f"برای راهنمایی بیشتر با پشتیبانی تماس بگیرید."
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to send panel info: {e}")
-        
-    except Exception as e:
-        logger.error(f"Error delivering order: {e}")
-        await message.answer(f"❌ خطا در تحویل سفارش: {e}")
+    
+    await state.update_data(deliver_order_id=order_id)
+    await state.set_state("waiting_for_panel_info")
+    
+    await callback.message.answer(
+        f"📡 لطفاً اطلاعات پنل سفارش #{order_id} را وارد کنید:\n"
+        "مثال: لینک: ... یوزرنیم: ... پسورد: ..."
+    )
+    await callback.answer()
+
+# ========== دریافت اطلاعات پنل از ادمین ==========
+@router.message(StateFilter("waiting_for_panel_info"))
+async def receive_panel_info(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    
+    data = await state.get_data()
+    order_id = data.get("deliver_order_id")
+    if not order_id:
+        await message.answer("❌ خطا: شناسه سفارش یافت نشد!")
+        await state.clear()
+        return
+    
+    panel_info = message.text
+    await db.update_order_status(order_id, "delivered", panel_info)
+    
+    # ویرایش پیام ادمین (اگر قابل دسترس باشد)
+    # می‌توانید این بخش را حذف کنید یا پیام جدید بفرستید
+    await state.clear()
+    await message.answer(f"✅ سفارش #{order_id} با موفقیت تحویل داده شد.")
+    
+    # اطلاع به کاربر
+    async with aiosqlite.connect(db.DB_PATH) as conn:
+        cursor = await conn.execute("SELECT user_id FROM orders WHERE id = ?", (order_id,))
+        row = await cursor.fetchone()
+        if row:
+            try:
+                await message.bot.send_message(
+                    row[0],
+                    f"🚀 **سفارش شما #{order_id} تحویل داده شد!**\n\n"
+                    f"📡 **اطلاعات پنل:**\n{panel_info}"
+                )
+            except Exception as e:
+                logger.error(f"Failed to send panel info: {e}")
 
 # ============================================================
 # ====================== مدیریت پلن‌ها ======================
