@@ -1,27 +1,28 @@
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.filters import Command
-from aiogram.utils.keyboard import InlineKeyboardBuilder
 import database as db
 import config
 import aiosqlite
 
 router = Router()
 
-async def main_menu_keyboard():
-    builder = InlineKeyboardBuilder()
-    builder.button(text="🚀 پروکسی", callback_data="menu_proxy")
-    builder.button(text="📡 V2Ray", callback_data="menu_v2ray")
-    builder.button(text="🔒 WireGuard", callback_data="menu_wireguard")
-    builder.button(text="🎮 DNS گیمرها", callback_data="menu_dns")
-    builder.button(text="🛒 خرید سرویس", callback_data="menu_shop")  # جدید
-    builder.button(text="💰 کیف پول", callback_data="menu_wallet")   # جدید
-    builder.button(text="👥 دعوت دوستان", callback_data="menu_invite")
-    builder.button(text="🎫 تیکت پشتیبانی", callback_data="menu_ticket")
-    builder.button(text="📞 پشتیبانی", callback_data="menu_support")
-    builder.adjust(2)
-    return builder.as_markup()
+# ========== منوی اصلی با دکمه‌های پایین صفحه (Reply Keyboard) ==========
+def main_menu_keyboard(user_id: int = None):
+    buttons = [
+        [KeyboardButton(text="🚀 پروکسی"), KeyboardButton(text="📡 V2Ray")],
+        [KeyboardButton(text="🔒 WireGuard"), KeyboardButton(text="🎮 DNS")],
+        [KeyboardButton(text="🛒 خرید سرویس"), KeyboardButton(text="💰 کیف پول")],
+        [KeyboardButton(text="👥 دعوت دوستان"), KeyboardButton(text="🎫 تیکت پشتیبانی")],
+        [KeyboardButton(text="📞 پشتیبانی"), KeyboardButton(text="📜 قوانین")],
+    ]
+    # دکمه مدیریت ربات فقط برای ادمین
+    if user_id and user_id in config.ADMIN_IDS:
+        buttons.append([KeyboardButton(text="⚙️ مدیریت ربات")])
+    
+    return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
+# ========== دستور /start ==========
 @router.message(Command("start"))
 async def start_handler(message: Message):
     user = message.from_user
@@ -41,41 +42,65 @@ async def start_handler(message: Message):
                 await message.answer("🎉 شما با دعوت دوست خود وارد شدید!")
     
     text = "به ربات VPN و پروکسی خوش آمدید!\nاز منوی زیر انتخاب کنید:"
-    await message.answer(text, reply_markup=await main_menu_keyboard())
+    await message.answer(text, reply_markup=main_menu_keyboard(user.id))
 
-@router.callback_query(F.data == "menu_main")
-async def back_to_main(callback: CallbackQuery):
-    await callback.message.delete()
-    await callback.message.answer("منوی اصلی:", reply_markup=await main_menu_keyboard())
-    await callback.answer()
+# ========== هندلرهای دکمه‌های منو ==========
 
-@router.callback_query(F.data == "check_join")
-async def check_join_callback(callback: CallbackQuery, bot):
-    try:
-        member = await bot.get_chat_member(chat_id=config.CHANNEL_ID, user_id=callback.from_user.id)
-        if member.status not in ["left", "kicked"]:
-            await callback.message.delete()
-            await start_handler(callback.message)
-        else:
-            await callback.answer("❌ شما هنوز عضو نشده‌اید!", show_alert=True)
-    except:
-        await callback.answer("خطا در بررسی عضویت!", show_alert=True)
+@router.message(F.text == "🚀 پروکسی")
+async def proxy_button(message: Message):
+    await message.answer("🔹 لیست پروکسی‌ها در حال دریافت...")
+    # کد مربوط به نمایش پروکسی‌ها را اینجا قرار دهید
 
-# ====== دکمه‌های جدید ======
-@router.callback_query(F.data == "menu_shop")
-async def shop_menu(callback: CallbackQuery):
-    await callback.message.edit_text(
-        "🛒 **خرید سرویس**\n\n"
-        "لطفاً نوع سرویس مورد نظر خود را انتخاب کنید:\n"
-        "🎮 گیمینگ\n"
-        "🌐 مولتی لوکیشن",
-        reply_markup=services_kb()
-    )
-    await callback.answer()
+@router.message(F.text == "📡 V2Ray")
+async def v2ray_button(message: Message):
+    await message.answer("📡 لیست کانفیگ‌های V2Ray در حال دریافت...")
+    # کد مربوط به نمایش V2Ray را اینجا قرار دهید
 
-@router.callback_query(F.data == "menu_wallet")
-async def wallet_menu(callback: CallbackQuery):
-    balance = await db.get_wallet_balance(callback.from_user.id)
+@router.message(F.text == "🔒 WireGuard")
+async def wireguard_button(message: Message):
+    await message.answer("🔒 لیست کانفیگ‌های WireGuard در حال دریافت...")
+    # کد مربوط به نمایش WireGuard را اینجا قرار دهید
+
+@router.message(F.text == "🎮 DNS")
+async def dns_button(message: Message):
+    await message.answer("🎮 لیست DNSهای پیشنهادی:\n...")
+    # کد مربوط به نمایش DNS را اینجا قرار دهید
+
+@router.message(F.text == "🛒 خرید سرویس")
+async def shop_button(message: Message):
+    from handlers.shop import services_kb
+    await message.answer("🛒 لطفاً نوع سرویس مورد نظر را انتخاب کنید:", reply_markup=services_kb())
+
+@router.message(F.text == "💰 کیف پول")
+async def wallet_button(message: Message):
+    balance = await db.get_wallet_balance(message.from_user.id)
     text = f"💰 **کیف پول شما**\n\nموجودی فعلی: {balance:,} تومان"
-    await callback.message.edit_text(text, reply_markup=back_menu_kb())
-    await callback.answer()
+    await message.answer(text, reply_markup=main_menu_keyboard(message.from_user.id))
+
+@router.message(F.text == "👥 دعوت دوستان")
+async def invite_button(message: Message):
+    from handlers.referral import invite_command
+    await invite_command(message)
+
+@router.message(F.text == "🎫 تیکت پشتیبانی")
+async def ticket_button(message: Message):
+    from handlers.ticket import ticket_menu
+    await message.answer("🎫 سیستم پشتیبانی:\nبرای ایجاد تیکت جدید از دستور /ticket استفاده کنید.")
+
+@router.message(F.text == "📞 پشتیبانی")
+async def support_button(message: Message):
+    text = f"📞 **پشتیبانی {config.BRAND_NAME}**\n\nبرای ارتباط با پشتیبانی:\n📩 پیوی ادمین: @{config.SUPPORT_USERNAME}\n🎫 سیستم تیکت: از منو گزینه تیکت پشتیبانی"
+    await message.answer(text, reply_markup=main_menu_keyboard(message.from_user.id))
+
+@router.message(F.text == "📜 قوانین")
+async def rules_button(message: Message):
+    text = f"📜 **قوانین {config.BRAND_NAME}**\n\n۱. استفاده از سرویس به معنای پذیرش قوانین است.\n۲. هرگونه سوءاستفاده منجر به مسدود شدن می‌شود.\n۳. پشتیبانی فقط از طریق ربات و پیوی ادمین."
+    await message.answer(text, reply_markup=main_menu_keyboard(message.from_user.id))
+
+@router.message(F.text == "⚙️ مدیریت ربات")
+async def admin_button(message: Message):
+    if message.from_user.id not in config.ADMIN_IDS:
+        await message.answer("❌ شما دسترسی ادمین ندارید!")
+        return
+    text = "⚙️ **پنل مدیریت**\n\nدستورات موجود:\n/stats - آمار کاربران\n/broadcast - ارسال همگانی\n/backup - بکاپ دیتابیس\n/restore - بازیابی دیتابیس\n/orders - مشاهده سفارشات"
+    await message.answer(text, reply_markup=main_menu_keyboard(message.from_user.id))
