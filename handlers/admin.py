@@ -2,6 +2,7 @@ from aiogram import Router, F
 from aiogram.types import Message, FSInputFile, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 import database as db
 import config
 import os
@@ -13,6 +14,10 @@ logger = logging.getLogger(__name__)
 
 router = Router()
 DB_PATH = "bot_database.db"
+
+# ========== State برای تحویل پنل ==========
+class DeliveryStates(StatesGroup):
+    waiting_for_panel_info = State()
 
 def is_admin(user_id):
     return user_id in config.ADMIN_IDS
@@ -198,7 +203,7 @@ async def clear_wireguard(message: Message):
     await message.answer("✅ تمام کانفیگ‌های WireGuard حذف شدند.")
 
 # ============================================================
-# ====================== مدیریت سفارشات با دکمه‌های اینلاین ======================
+# ====================== مدیریت سفارشات ======================
 # ============================================================
 
 @router.message(Command("orders"))
@@ -235,7 +240,6 @@ async def confirm_order_callback(callback: CallbackQuery):
         order_id = int(callback.data.split("_")[2])
         logger.info(f"Admin {callback.from_user.id} confirmed order #{order_id} via inline button")
         
-        # بررسی سفارش
         async with aiosqlite.connect(db.DB_PATH) as conn:
             cursor = await conn.execute("SELECT * FROM orders WHERE id = ?", (order_id,))
             order = await cursor.fetchone()
@@ -248,13 +252,14 @@ async def confirm_order_callback(callback: CallbackQuery):
                 await callback.answer(f"❌ سفارش در وضعیت {current_status} است!", show_alert=True)
                 return
         
-        # تأیید سفارش
         await db.update_order_status(order_id, "confirmed")
         
         # ویرایش پیام ادمین
         await callback.message.edit_caption(
-            caption=f"{callback.message.caption}\n\n✅ **سفارش #{order_id} توسط ادمین تأیید شد.**",
-            reply_markup=None
+            caption=f"{callback.message.caption}\n\n✅ **سفارش #{order_id} توسط ادمین تأیید شد.**\n\n📡 برای تحویل، روی دکمه «تحویل» کلیک کنید.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="📡 تحویل", callback_data=f"deliver_order_{order_id}")]
+            ])
         )
         await callback.answer("✅ سفارش تأیید شد!")
         
@@ -318,7 +323,7 @@ async def reject_order_callback(callback: CallbackQuery):
         logger.error(f"Error in reject_order_callback: {e}")
         await callback.answer(f"❌ خطا: {e}", show_alert=True)
 
-# ========== دکمه تحویل ==========
+# ========== دکمه تحویل (با State) ==========
 @router.callback_query(F.data.startswith("deliver_order_"))
 async def deliver_order_callback(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
@@ -327,7 +332,7 @@ async def deliver_order_callback(callback: CallbackQuery, state: FSMContext):
     
     order_id = int(callback.data.split("_")[2])
     
-    # بررسی اینکه سفارش تأیید شده باشد
+    # بررسی وضعیت سفارش
     async with aiosqlite.connect(db.DB_PATH) as conn:
         cursor = await conn.execute("SELECT status FROM orders WHERE id = ?", (order_id,))
         row = await cursor.fetchone()
@@ -339,16 +344,21 @@ async def deliver_order_callback(callback: CallbackQuery, state: FSMContext):
             return
     
     await state.update_data(deliver_order_id=order_id)
-    await state.set_state("waiting_for_panel_info")
+    await state.set_state(DeliveryStates.waiting_for_panel_info)
     
     await callback.message.answer(
-        f"📡 لطفاً اطلاعات پنل سفارش #{order_id} را وارد کنید:\n"
-        "مثال: لینک: ... یوزرنیم: ... پسورد: ..."
+        f"📡 **تحویل سفارش #{order_id}**\n\n"
+        "لطفاً اطلاعات پنل را به فرمت زیر وارد کنید:\n"
+        "مثال:\n"
+        "لینک: https://example.com\n"
+        "یوزرنیم: admin\n"
+        "پسورد: 123456\n\n"
+        "یا هر اطلاعات دیگری که کاربر نیاز دارد."
     )
     await callback.answer()
 
-# ========== دریافت اطلاعات پنل از ادمین ==========
-@router.message(StateFilter("waiting_for_panel_info"))
+# ========== دریافت اطلاعات پنل ==========
+@router.message(DeliveryStates.waiting_for_panel_info)
 async def receive_panel_info(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
@@ -356,17 +366,14 @@ async def receive_panel_info(message: Message, state: FSMContext):
     data = await state.get_data()
     order_id = data.get("deliver_order_id")
     if not order_id:
-        await message.answer("❌ خطا: شناسه سفارش یافت نشد!")
+        await message.answer("❌ خطا: شناسه سفارش یافت نشد! لطفاً دوباره از دکمه تحویل استفاده کنید.")
         await state.clear()
         return
     
     panel_info = message.text
-    await db.update_order_status(order_id, "delivered", panel_info)
     
-    # ویرایش پیام ادمین (اگر قابل دسترس باشد)
-    # می‌توانید این بخش را حذف کنید یا پیام جدید بفرستید
-    await state.clear()
-    await message.answer(f"✅ سفارش #{order_id} با موفقیت تحویل داده شد.")
+    # به‌روزرسانی وضعیت سفارش
+    await db.update_order_status(order_id, "delivered", panel_info)
     
     # اطلاع به کاربر
     async with aiosqlite.connect(db.DB_PATH) as conn:
@@ -377,10 +384,15 @@ async def receive_panel_info(message: Message, state: FSMContext):
                 await message.bot.send_message(
                     row[0],
                     f"🚀 **سفارش شما #{order_id} تحویل داده شد!**\n\n"
-                    f"📡 **اطلاعات پنل:**\n{panel_info}"
+                    f"📡 **اطلاعات پنل:**\n{panel_info}\n\n"
+                    f"با تشکر از انتخاب شما."
                 )
+                logger.info(f"Panel info sent to user {row[0]} for order {order_id}")
             except Exception as e:
                 logger.error(f"Failed to send panel info: {e}")
+    
+    await state.clear()
+    await message.answer(f"✅ سفارش #{order_id} با موفقیت تحویل داده شد و اطلاعات پنل به کاربر ارسال گردید.")
 
 # ============================================================
 # ====================== مدیریت پلن‌ها ======================
