@@ -6,6 +6,9 @@ import config
 import os
 import re
 import aiosqlite
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = Router()
 DB_PATH = "bot_database.db"
@@ -194,7 +197,7 @@ async def clear_wireguard(message: Message):
     await message.answer("✅ تمام کانفیگ‌های WireGuard حذف شدند.")
 
 # ============================================================
-# ====================== مدیریت سفارشات ======================
+# ====================== مدیریت سفارشات (نسخه نهایی با دیباگ) ======================
 # ============================================================
 
 @router.message(Command("orders"))
@@ -210,70 +213,186 @@ async def list_orders(message: Message):
         text += f"🆔 #{o[0]} | 👤 {o[3]} | 📦 {o[5]} | 👥 {o[8]} نفر | 💰 {o[4]:,} تومان\n"
     await message.answer(text[:4000])
 
+# ========== تأیید سفارش (نسخه نهایی با مدیریت خطا) ==========
 @router.message(Command("confirm_"))
 async def confirm_order(message: Message):
     if not is_admin(message.from_user.id):
+        await message.answer("❌ شما دسترسی ادمین ندارید!")
         return
+    
     try:
-        order_id = int(message.text.split("_")[1])
+        # استخراج شناسه سفارش از دستور
+        full_text = message.text
+        logger.info(f"Received command: {full_text} from admin {message.from_user.id}")
+        
+        # پیدا کردن شماره سفارش با regex
+        import re
+        match = re.search(r'confirm_(\d+)', full_text)
+        if not match:
+            await message.answer("❌ فرمت: /confirm_<order_id>\nمثال: /confirm_2")
+            return
+        
+        order_id = int(match.group(1))
+        logger.info(f"Admin {message.from_user.id} confirming order #{order_id}")
+        
+        # بررسی وجود سفارش
+        async with aiosqlite.connect(db.DB_PATH) as conn:
+            cursor = await conn.execute("SELECT * FROM orders WHERE id = ?", (order_id,))
+            order = await cursor.fetchone()
+            if not order:
+                await message.answer(f"❌ سفارش #{order_id} یافت نشد!")
+                return
+            
+            if order[6] != "pending" and order[6] != "receipt_sent":
+                await message.answer(f"❌ سفارش #{order_id} در وضعیت {order[6]} است و قابل تأیید نیست!")
+                return
+        
+        # به‌روزرسانی وضعیت سفارش
         await db.update_order_status(order_id, "confirmed")
-        await message.answer(f"✅ سفارش #{order_id} تأیید شد.")
+        await message.answer(f"✅ سفارش #{order_id} با موفقیت تأیید شد.")
+        
+        # اطلاع به کاربر
         async with aiosqlite.connect(db.DB_PATH) as conn:
             cursor = await conn.execute("SELECT user_id FROM orders WHERE id = ?", (order_id,))
             row = await cursor.fetchone()
             if row:
                 try:
-                    await message.bot.send_message(row[0], f"✅ سفارش شما #{order_id} تأیید شد!\nبه زودی اطلاعات پنل ارسال می‌شود.")
-                except:
-                    pass
-    except:
-        await message.answer("❌ خطا در تأیید سفارش.")
+                    await message.bot.send_message(
+                        row[0],
+                        f"✅ **سفارش شما #{order_id} تأیید شد!**\n\n"
+                        f"به زودی اطلاعات پنل برای شما ارسال می‌شود.\n"
+                        f"لطفاً منتظر پیام بعدی باشید."
+                    )
+                    logger.info(f"User {row[0]} notified about confirmation of order {order_id}")
+                except Exception as e:
+                    logger.error(f"Failed to notify user: {e}")
+            else:
+                logger.warning(f"User for order {order_id} not found")
+        
+    except ValueError:
+        await message.answer("❌ شناسه سفارش نامعتبر است!\nفرمت: /confirm_<order_id>")
+    except Exception as e:
+        logger.error(f"Error confirming order: {e}")
+        await message.answer(f"❌ خطا در تأیید سفارش: {e}")
 
+# ========== رد سفارش ==========
 @router.message(Command("reject_"))
 async def reject_order(message: Message):
     if not is_admin(message.from_user.id):
+        await message.answer("❌ شما دسترسی ادمین ندارید!")
         return
+    
     try:
-        order_id = int(message.text.split("_")[1])
+        import re
+        match = re.search(r'reject_(\d+)', message.text)
+        if not match:
+            await message.answer("❌ فرمت: /reject_<order_id>\nمثال: /reject_2")
+            return
+        
+        order_id = int(match.group(1))
+        logger.info(f"Admin {message.from_user.id} rejecting order #{order_id}")
+        
+        # بررسی وجود سفارش
+        async with aiosqlite.connect(db.DB_PATH) as conn:
+            cursor = await conn.execute("SELECT * FROM orders WHERE id = ?", (order_id,))
+            order = await cursor.fetchone()
+            if not order:
+                await message.answer(f"❌ سفارش #{order_id} یافت نشد!")
+                return
+        
         await db.update_order_status(order_id, "rejected")
         await message.answer(f"❌ سفارش #{order_id} رد شد.")
+        
         async with aiosqlite.connect(db.DB_PATH) as conn:
             cursor = await conn.execute("SELECT user_id FROM orders WHERE id = ?", (order_id,))
             row = await cursor.fetchone()
             if row:
                 try:
-                    await message.bot.send_message(row[0], f"❌ سفارش شما #{order_id} رد شد.\nبرای اطلاعات بیشتر با پشتیبانی تماس بگیرید.")
-                except:
-                    pass
-    except:
-        await message.answer("❌ خطا در رد سفارش.")
+                    await message.bot.send_message(
+                        row[0],
+                        f"❌ **سفارش شما #{order_id} رد شد.**\n\n"
+                        f"برای اطلاعات بیشتر با پشتیبانی تماس بگیرید."
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to notify user: {e}")
+        
+    except Exception as e:
+        logger.error(f"Error rejecting order: {e}")
+        await message.answer(f"❌ خطا در رد سفارش: {e}")
 
+# ========== تحویل سفارش ==========
 @router.message(Command("deliver_"))
 async def deliver_order(message: Message):
     if not is_admin(message.from_user.id):
+        await message.answer("❌ شما دسترسی ادمین ندارید!")
         return
-    parts = message.text.split(maxsplit=2)
-    if len(parts) < 3:
-        await message.answer("❌ فرمت: /deliver_<order_id> <اطلاعات پنل>")
-        return
+    
     try:
-        order_id = int(parts[0].split("_")[1])
-        panel_info = parts[1] + " " + parts[2] if len(parts) > 2 else parts[1]
+        import re
+        full_text = message.text
+        
+        # استخراج order_id
+        match = re.search(r'deliver_(\d+)', full_text)
+        if not match:
+            await message.answer("❌ فرمت: /deliver_<order_id> <اطلاعات پنل>\nمثال: /deliver_2 لینک: ... یوزرنیم: ... پسورد: ...")
+            return
+        
+        order_id = int(match.group(1))
+        
+        # استخراج اطلاعات پنل (بعد از دستور)
+        parts = full_text.split(maxsplit=2)
+        if len(parts) < 2:
+            await message.answer("❌ لطفاً اطلاعات پنل را وارد کنید!\nمثال: /deliver_2 لینک: ... یوزرنیم: ... پسورد: ...")
+            return
+        
+        panel_info = parts[1] if len(parts) == 2 else parts[1] + " " + parts[2] if len(parts) > 2 else ""
+        
+        if not panel_info:
+            await message.answer("❌ لطفاً اطلاعات پنل را وارد کنید!")
+            return
+        
+        logger.info(f"Admin {message.from_user.id} delivering order #{order_id}")
+        
+        # بررسی وجود سفارش
+        async with aiosqlite.connect(db.DB_PATH) as conn:
+            cursor = await conn.execute("SELECT * FROM orders WHERE id = ?", (order_id,))
+            order = await cursor.fetchone()
+            if not order:
+                await message.answer(f"❌ سفارش #{order_id} یافت نشد!")
+                return
+        
         await db.update_order_status(order_id, "delivered", panel_info)
-        await message.answer(f"✅ سفارش #{order_id} تحویل داده شد.")
+        await message.answer(f"✅ سفارش #{order_id} با موفقیت تحویل داده شد.")
+        
         async with aiosqlite.connect(db.DB_PATH) as conn:
             cursor = await conn.execute("SELECT user_id FROM orders WHERE id = ?", (order_id,))
             row = await cursor.fetchone()
             if row:
                 try:
-                    await message.bot.send_message(row[0], f"🚀 سفارش #{order_id} تحویل شد!\n📡 {panel_info}")
-                except:
-                    pass
-    except:
-        await message.answer("❌ خطا در تحویل سفارش.")
+                    await message.bot.send_message(
+                        row[0],
+                        f"🚀 **سفارش شما #{order_id} تحویل داده شد!**\n\n"
+                        f"📡 **اطلاعات پنل:**\n{panel_info}\n\n"
+                        f"برای راهنمایی بیشتر با پشتیبانی تماس بگیرید."
+                    )
+                    logger.info(f"Panel info sent to user {row[0]}")
+                except Exception as e:
+                    logger.error(f"Failed to send panel info: {e}")
+        
+    except Exception as e:
+        logger.error(f"Error delivering order: {e}")
+        await message.answer(f"❌ خطا در تحویل سفارش: {e}")
+
+# ========== تست دستورات ==========
+@router.message(Command("test_admin"))
+async def test_admin(message: Message):
+    if not is_admin(message.from_user.id):
+        await message.answer("❌ شما دسترسی ادمین ندارید!")
+        return
+    await message.answer("✅ دستورات ادمین به درستی کار می‌کنند!")
 
 # ============================================================
-# ====================== مدیریت پلن‌ها (ادمین) ======================
+# ====================== مدیریت پلن‌ها ======================
 # ============================================================
 
 @router.message(Command("show_plans"))
@@ -300,7 +419,7 @@ async def show_plans(message: Message):
     text += "/add_normal <حجم> <قیمت> <تعداد کاربر> - اضافه کردن پلن عادی\n"
     text += "/add_vip <برچسب> <قیمت> <تعداد کاربر> - اضافه کردن پلن ویژه\n"
     text += "/edit_normal <id> <حجم> <قیمت> <تعداد کاربر> - ویرایش پلن عادی\n"
-    text += "/edit_vip <id> <برچسب> <قیمت> <تعداد کاربر> - ویرایش پلن ویژه (برچسب می‌تواند فارسی باشد)\n"
+    text += "/edit_vip <id>|<برچسب>|<قیمت>|<تعداد> - ویرایش پلن ویژه (با | جدا کنید)\n"
     text += "/change_normal_users <id> <تعداد> - تغییر تعداد کاربران پلن عادی\n"
     text += "/change_vip_users <id> <تعداد> - تغییر تعداد کاربران پلن ویژه\n"
     text += "/delete_plan <id> - حذف پلن"
@@ -377,48 +496,29 @@ async def edit_vip_plan(message: Message):
     if not is_admin(message.from_user.id):
         return
     
-    # حذف دستور و گرفتن متن
     text = message.text.replace("/edit_vip", "").strip()
     if not text:
-        await message.answer("❌ فرمت: /edit_vip <id> <برچسب> <قیمت> <تعداد کاربر>\nمثال: /edit_vip 1 VIP-ماهانه 250000 1\nیا: /edit_vip 1 VIP یکماهه نامحدود 250000 1")
-        return
-    
-    # پیدا کردن شناسه (اولین عدد)
-    parts = text.split()
-    if len(parts) < 4:
-        await message.answer("❌ فرمت: /edit_vip <id> <برچسب> <قیمت> <تعداد کاربر>\nمثال: /edit_vip 1 VIP-ماهانه 250000 1")
+        await message.answer("❌ فرمت: /edit_vip <id>|<برچسب>|<قیمت>|<تعداد>\nمثال: /edit_vip 1|VIP یکماهه نامحدود|250000|1")
         return
     
     try:
-        plan_id = int(parts[0])
-        # بقیه متن به عنوان برچسب
-        # آخرین عدد قیمت و عدد قبل از آن تعداد کاربران است
-        # اما اگر برچسب شامل اعداد باشد، این روش ممکن است خطا دهد.
-        # بهتر است از جداکننده | استفاده کنیم
         if '|' in text:
-            # فرمت با جداکننده: id|برچسب|قیمت|تعداد
-            parts2 = text.split('|')
-            if len(parts2) != 4:
-                await message.answer("❌ فرمت با | : id|برچسب|قیمت|تعداد\nمثال: /edit_vip 1|VIP یکماهه نامحدود|250000|1")
+            parts = text.split('|')
+            if len(parts) != 4:
+                await message.answer("❌ فرمت: /edit_vip <id>|<برچسب>|<قیمت>|<تعداد>\nمثال: /edit_vip 1|VIP یکماهه نامحدود|250000|1")
                 return
-            plan_id = int(parts2[0].strip())
-            label = parts2[1].strip()
-            price = int(parts2[2].strip())
-            user_count = int(parts2[3].strip())
+            plan_id = int(parts[0].strip())
+            label = parts[1].strip()
+            price = int(parts[2].strip())
+            user_count = int(parts[3].strip())
         else:
-            # فرمت معمولی: id برچسب قیمت تعداد
-            # پیدا کردن قیمت و تعداد از انتها
-            # فرض می‌کنیم دو عدد آخر قیمت و تعداد هستند
-            # پس برچسب همه چیز بین شناسه و دو عدد آخر است
-            price = int(parts[-2])
-            user_count = int(parts[-1])
-            label = ' '.join(parts[1:-2])
-            if not label:
-                await message.answer("❌ برچسب نمی‌تواند خالی باشد!")
-                return
+            await message.answer("❌ لطفاً از جداکننده `|` استفاده کنید!\nمثال: /edit_vip 1|VIP یکماهه نامحدود|250000|1")
+            return
         
         await db.update_vip_plan(plan_id, label, price, user_count)
         await message.answer(f"✅ پلن ویژه {plan_id} با موفقیت ویرایش شد!\n⭐ {label} | {price:,} تومان | 👤 {user_count} کاربر")
+    except ValueError:
+        await message.answer("❌ شناسه، قیمت و تعداد کاربران باید عدد باشند!")
     except Exception as e:
         await message.answer(f"❌ خطا: {e}")
 
@@ -437,7 +537,6 @@ async def change_normal_users(message: Message):
         plan_id = int(parts[1])
         new_count = int(parts[2])
         
-        # دریافت پلن فعلی
         plan = await db.get_normal_plan(plan_id)
         if not plan:
             await message.answer(f"❌ پلن عادی با شناسه {plan_id} یافت نشد!")
@@ -446,6 +545,8 @@ async def change_normal_users(message: Message):
         plan_id, volume, price, _ = plan
         await db.update_normal_plan(plan_id, volume, price, new_count)
         await message.answer(f"✅ تعداد کاربران پلن عادی {plan_id} به {new_count} نفر تغییر یافت!\n📦 {volume} گیگ | {price:,} تومان | 👤 {new_count} کاربر")
+    except ValueError:
+        await message.answer("❌ شناسه و تعداد باید عدد باشند!")
     except Exception as e:
         await message.answer(f"❌ خطا: {e}")
 
@@ -464,7 +565,6 @@ async def change_vip_users(message: Message):
         plan_id = int(parts[1])
         new_count = int(parts[2])
         
-        # دریافت پلن فعلی
         plan = await db.get_vip_plan(plan_id)
         if not plan:
             await message.answer(f"❌ پلن ویژه با شناسه {plan_id} یافت نشد!")
@@ -473,6 +573,8 @@ async def change_vip_users(message: Message):
         plan_id, label, price, _ = plan
         await db.update_vip_plan(plan_id, label, price, new_count)
         await message.answer(f"✅ تعداد کاربران پلن ویژه {plan_id} به {new_count} نفر تغییر یافت!\n⭐ {label} | {price:,} تومان | 👤 {new_count} کاربر")
+    except ValueError:
+        await message.answer("❌ شناسه و تعداد باید عدد باشند!")
     except Exception as e:
         await message.answer(f"❌ خطا: {e}")
 
@@ -503,5 +605,7 @@ async def delete_plan(message: Message):
             await message.answer(f"✅ پلن ویژه {plan_id} حذف شد.")
         else:
             await message.answer(f"❌ پلن {plan_id} یافت نشد!")
+    except ValueError:
+        await message.answer("❌ شناسه پلن باید عدد باشد!")
     except Exception as e:
         await message.answer(f"❌ خطا: {e}")
