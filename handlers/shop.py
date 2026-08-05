@@ -22,7 +22,7 @@ def services_kb():
     ]
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
-# ========== دکمه عادی ==========
+# ========== دکمه عادی (نمایش پلن‌ها با دکمه‌های Inline) ==========
 @router.message(F.text == "📦 عادی")
 async def normal_plans(message: Message):
     plans = await db.get_normal_plans()
@@ -31,14 +31,24 @@ async def normal_plans(message: Message):
         return
     
     text = "📦 **پلن‌های عادی:**\n\n"
+    buttons = []
     for plan in plans:
         plan_id, volume_gb, price = plan
         text += f"📦 {volume_gb} گیگ → {price:,} تومان\n"
-        text += f"برای خرید: `/buy_normal_{plan_id}`\n\n"
+        buttons.append([InlineKeyboardButton(
+            text=f"خرید {volume_gb} گیگ",
+            callback_data=f"buy_normal_{plan_id}"
+        )])
     
-    await message.answer(text, reply_markup=services_kb())
+    # دکمه بازگشت
+    buttons.append([InlineKeyboardButton(text="🔙 بازگشت", callback_data="back_to_services")])
+    
+    await message.answer(
+        text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
 
-# ========== دکمه ویژه ==========
+# ========== دکمه ویژه (نمایش پلن‌ها با دکمه‌های Inline) ==========
 @router.message(F.text == "⭐ ویژه")
 async def vip_plans(message: Message):
     plans = await db.get_vip_plans()
@@ -47,40 +57,61 @@ async def vip_plans(message: Message):
         return
     
     text = "⭐ **پلن‌های ویژه:**\n\n"
+    buttons = []
     for plan in plans:
         plan_id, label, price = plan
         text += f"⭐ {label} → {price:,} تومان\n"
-        text += f"برای خرید: `/buy_vip_{plan_id}`\n\n"
+        buttons.append([InlineKeyboardButton(
+            text=f"خرید {label}",
+            callback_data=f"buy_vip_{plan_id}"
+        )])
     
-    await message.answer(text, reply_markup=services_kb())
+    buttons.append([InlineKeyboardButton(text="🔙 بازگشت", callback_data="back_to_services")])
+    
+    await message.answer(
+        text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
 
-# ========== دکمه بازگشت ==========
+# ========== بازگشت از لیست پلن‌ها به منوی خرید ==========
+@router.callback_query(F.data == "back_to_services")
+async def back_to_services(callback: CallbackQuery):
+    await callback.message.delete()
+    await callback.message.answer(
+        "🛒 **خرید سرویس**\n\n"
+        "لطفاً نوع سرویس مورد نظر را انتخاب کنید:\n"
+        "📦 عادی - مناسب کاربری روزمره\n"
+        "⭐ ویژه - سرعت و کیفیت بالاتر",
+        reply_markup=services_kb()
+    )
+    await callback.answer()
+
+# ========== بازگشت به منوی اصلی ==========
 @router.message(F.text == "🔙 بازگشت به منو")
 async def back_to_main(message: Message):
     from handlers.start import main_menu_keyboard
     await message.answer("منوی اصلی:", reply_markup=main_menu_keyboard(message.from_user.id))
 
-# ========== خرید عادی ==========
-@router.message(Command("buy_normal_"))
-async def buy_normal(message: Message, state: FSMContext):
-    try:
-        plan_id = int(message.text.split("_")[2])
-        plan = await db.get_normal_plan(plan_id)
-        if not plan:
-            await message.answer("❌ پلن یافت نشد!", reply_markup=services_kb())
-            return
-        
-        plan_name = f"{plan[1]} گیگ (عادی)"
-        price = plan[2]
-        
-        await state.update_data(
-            plan_id=plan_id,
-            plan_name=plan_name,
-            price=price,
-            service_type="normal"
-        )
-        
-        text = f"""
+# ========== خرید عادی (Callback) ==========
+@router.callback_query(F.data.startswith("buy_normal_"))
+async def buy_normal_callback(callback: CallbackQuery, state: FSMContext):
+    plan_id = int(callback.data.split("_")[2])
+    plan = await db.get_normal_plan(plan_id)
+    if not plan:
+        await callback.answer("❌ پلن یافت نشد!", show_alert=True)
+        return
+    
+    plan_name = f"{plan[1]} گیگ (عادی)"
+    price = plan[2]
+    
+    await state.update_data(
+        plan_id=plan_id,
+        plan_name=plan_name,
+        price=price,
+        service_type="normal"
+    )
+    
+    text = f"""
 📋 **سفارش شما:**
 
 📦 سرویس: {plan_name}
@@ -93,33 +124,31 @@ async def buy_normal(message: Message, state: FSMContext):
 
 📸 بعد از واریز، رسید را (عکس) در همینجا ارسال کنید.
 """
-        await message.answer(text, reply_markup=services_kb())
-        await state.set_state(BuyStates.waiting_for_receipt)
-        
-    except Exception as e:
-        await message.answer(f"❌ خطا در پردازش سفارش: {e}", reply_markup=services_kb())
+    await callback.message.edit_text(text)
+    await callback.message.answer("📸 لطفاً رسید را ارسال کنید:", reply_markup=services_kb())
+    await state.set_state(BuyStates.waiting_for_receipt)
+    await callback.answer()
 
-# ========== خرید ویژه ==========
-@router.message(Command("buy_vip_"))
-async def buy_vip(message: Message, state: FSMContext):
-    try:
-        plan_id = int(message.text.split("_")[2])
-        plan = await db.get_vip_plan(plan_id)
-        if not plan:
-            await message.answer("❌ پلن یافت نشد!", reply_markup=services_kb())
-            return
-        
-        plan_name = f"{plan[1]} (ویژه)"
-        price = plan[2]
-        
-        await state.update_data(
-            plan_id=plan_id,
-            plan_name=plan_name,
-            price=price,
-            service_type="vip"
-        )
-        
-        text = f"""
+# ========== خرید ویژه (Callback) ==========
+@router.callback_query(F.data.startswith("buy_vip_"))
+async def buy_vip_callback(callback: CallbackQuery, state: FSMContext):
+    plan_id = int(callback.data.split("_")[2])
+    plan = await db.get_vip_plan(plan_id)
+    if not plan:
+        await callback.answer("❌ پلن یافت نشد!", show_alert=True)
+        return
+    
+    plan_name = f"{plan[1]} (ویژه)"
+    price = plan[2]
+    
+    await state.update_data(
+        plan_id=plan_id,
+        plan_name=plan_name,
+        price=price,
+        service_type="vip"
+    )
+    
+    text = f"""
 📋 **سفارش شما:**
 
 ⭐ سرویس ویژه: {plan_name}
@@ -132,11 +161,10 @@ async def buy_vip(message: Message, state: FSMContext):
 
 📸 بعد از واریز، رسید را (عکس) در همینجا ارسال کنید.
 """
-        await message.answer(text, reply_markup=services_kb())
-        await state.set_state(BuyStates.waiting_for_receipt)
-        
-    except Exception as e:
-        await message.answer(f"❌ خطا در پردازش سفارش: {e}", reply_markup=services_kb())
+    await callback.message.edit_text(text)
+    await callback.message.answer("📸 لطفاً رسید را ارسال کنید:", reply_markup=services_kb())
+    await state.set_state(BuyStates.waiting_for_receipt)
+    await callback.answer()
 
 # ========== دریافت رسید ==========
 @router.message(BuyStates.waiting_for_receipt, F.photo)
@@ -149,6 +177,7 @@ async def receive_receipt(message: Message, state: FSMContext):
     
     file_id = message.photo[-1].file_id
     
+    # ایجاد سفارش
     order_id = await db.create_order(
         user_id=message.from_user.id,
         username=message.from_user.username,
@@ -161,6 +190,7 @@ async def receive_receipt(message: Message, state: FSMContext):
     await db.update_order_receipt(order_id, file_id)
     await state.clear()
     
+    # اطلاع به ادمین
     for admin_id in config.ADMIN_IDS:
         try:
             await message.bot.send_photo(
@@ -194,83 +224,49 @@ async def invalid_receipt(message: Message):
         reply_markup=services_kb()
     )
 
-# ========== خرید از طریق دکمه Inline ==========
-@router.callback_query(F.data.startswith("buy_normal_"))
-async def buy_normal_callback(callback: CallbackQuery, state: FSMContext):
-    plan_id = int(callback.data.split("_")[2])
-    plan = await db.get_normal_plan(plan_id)
-    if not plan:
-        await callback.answer("❌ پلن یافت نشد!", show_alert=True)
-        return
-    
-    plan_name = f"{plan[1]} گیگ (عادی)"
-    price = plan[2]
-    
-    await state.update_data(
-        plan_id=plan_id,
-        plan_name=plan_name,
-        price=price,
-        service_type="normal"
-    )
-    
-    text = f"""
-📋 **سفارش شما:**
+# ========== دستورات خرید به‌عنوان Command (اختیاری) ==========
+@router.message(Command("buy_normal_"))
+async def buy_normal_command(message: Message, state: FSMContext):
+    # همانند کالبک، اما برای کاربرانی که دستور تایپ می‌کنند
+    try:
+        plan_id = int(message.text.split("_")[2])
+        plan = await db.get_normal_plan(plan_id)
+        if not plan:
+            await message.answer("❌ پلن یافت نشد!", reply_markup=services_kb())
+            return
+        # ادامه مثل کالبک
+        plan_name = f"{plan[1]} گیگ (عادی)"
+        price = plan[2]
+        await state.update_data(plan_id=plan_id, plan_name=plan_name, price=price, service_type="normal")
+        text = f"..."
+        await message.answer(text, reply_markup=services_kb())
+        await state.set_state(BuyStates.waiting_for_receipt)
+    except:
+        await message.answer("❌ خطا در پردازش دستور.", reply_markup=services_kb())
 
-📦 سرویس: {plan_name}
-💰 قیمت: {price:,} تومان
-
-💳 برای پرداخت به پیوی ادمین بروید:
-👤 @{config.SUPPORT_USERNAME}
-
-📸 بعد از واریز، رسید را ارسال کنید.
-"""
-    await callback.message.edit_text(text)
-    await callback.message.answer("📸 لطفاً رسید را ارسال کنید:", reply_markup=services_kb())
-    await state.set_state(BuyStates.waiting_for_receipt)
-    await callback.answer()
-
-@router.callback_query(F.data.startswith("buy_vip_"))
-async def buy_vip_callback(callback: CallbackQuery, state: FSMContext):
-    plan_id = int(callback.data.split("_")[2])
-    plan = await db.get_vip_plan(plan_id)
-    if not plan:
-        await callback.answer("❌ پلن یافت نشد!", show_alert=True)
-        return
-    
-    plan_name = f"{plan[1]} (ویژه)"
-    price = plan[2]
-    
-    await state.update_data(
-        plan_id=plan_id,
-        plan_name=plan_name,
-        price=price,
-        service_type="vip"
-    )
-    
-    text = f"""
-📋 **سفارش شما:**
-
-⭐ سرویس ویژه: {plan_name}
-💰 قیمت: {price:,} تومان
-
-💳 برای پرداخت به پیوی ادمین بروید:
-👤 @{config.SUPPORT_USERNAME}
-
-📸 بعد از واریز، رسید را ارسال کنید.
-"""
-    await callback.message.edit_text(text)
-    await callback.message.answer("📸 لطفاً رسید را ارسال کنید:", reply_markup=services_kb())
-    await state.set_state(BuyStates.waiting_for_receipt)
-    await callback.answer()
+@router.message(Command("buy_vip_"))
+async def buy_vip_command(message: Message, state: FSMContext):
+    # مشابه
+    try:
+        plan_id = int(message.text.split("_")[2])
+        plan = await db.get_vip_plan(plan_id)
+        if not plan:
+            await message.answer("❌ پلن یافت نشد!", reply_markup=services_kb())
+            return
+        plan_name = f"{plan[1]} (ویژه)"
+        price = plan[2]
+        await state.update_data(plan_id=plan_id, plan_name=plan_name, price=price, service_type="vip")
+        text = f"..."
+        await message.answer(text, reply_markup=services_kb())
+        await state.set_state(BuyStates.waiting_for_receipt)
+    except:
+        await message.answer("❌ خطا در پردازش دستور.", reply_markup=services_kb())
 
 # ========== کوپن تخفیف ==========
 @router.message(Command("coupon"))
 async def enter_coupon(message: Message, state: FSMContext):
     await state.set_state(BuyStates.entering_coupon_code)
-    await message.answer(
-        "📝 کد تخفیف خود را وارد کنید:",
-        reply_markup=services_kb()
-    )
+    await message.answer("📝 کد تخفیف خود را وارد کنید:", reply_markup=services_kb())
 
 @router.message(BuyStates.entering_coupon_code)
 async def apply_coupon(message: Message, state: FSMContext):
