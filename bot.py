@@ -11,7 +11,6 @@ from handlers import start, proxy, v2ray, wireguard, dns, buy, support, admin, t
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ========== آنتی‌اسپم ==========
 class ThrottlingMiddleware(BaseMiddleware):
     def __init__(self, rate_limit: float = 0.6):
         self.rate_limit = rate_limit
@@ -29,14 +28,12 @@ class ThrottlingMiddleware(BaseMiddleware):
             self.last_call[user.id] = now
         return await handler(event, data)
 
-# ========== راه‌اندازی ==========
 bot = Bot(token=config.BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
 dp.message.outer_middleware(ThrottlingMiddleware(rate_limit=0.7))
 dp.callback_query.outer_middleware(ThrottlingMiddleware(rate_limit=0.4))
 
-# ========== ثبت روت‌ها ==========
 dp.include_router(start.router)
 dp.include_router(proxy.router)
 dp.include_router(v2ray.router)
@@ -49,18 +46,12 @@ dp.include_router(ticket.router)
 dp.include_router(referral.router)
 dp.include_router(shop.router)
 
-# ========== تنظیم دستورات با فرمت صحیح ==========
-async def set_commands():
-    commands = [
-        BotCommand(command="start", description="شروع مجدد"),
-        BotCommand(command="coupon", description="استفاده از کد تخفیف"),
-    ]
-    await bot.set_my_commands(commands)
-
-# ========== اجرا ==========
 async def main():
     await db.init_db()
-    await set_commands()
+    await bot.set_my_commands([
+        BotCommand(command="start", description="شروع مجدد"),
+        BotCommand(command="coupon", description="استفاده از کد تخفیف"),
+    ])
     logger.info("✅ Bot started!")
     await dp.start_polling(bot)
 
