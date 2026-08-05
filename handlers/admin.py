@@ -300,7 +300,9 @@ async def show_plans(message: Message):
     text += "/add_normal <حجم> <قیمت> <تعداد کاربر> - اضافه کردن پلن عادی\n"
     text += "/add_vip <برچسب> <قیمت> <تعداد کاربر> - اضافه کردن پلن ویژه\n"
     text += "/edit_normal <id> <حجم> <قیمت> <تعداد کاربر> - ویرایش پلن عادی\n"
-    text += "/edit_vip <id> <برچسب> <قیمت> <تعداد کاربر> - ویرایش پلن ویژه\n"
+    text += "/edit_vip <id> <برچسب> <قیمت> <تعداد کاربر> - ویرایش پلن ویژه (برچسب می‌تواند فارسی باشد)\n"
+    text += "/change_normal_users <id> <تعداد> - تغییر تعداد کاربران پلن عادی\n"
+    text += "/change_vip_users <id> <تعداد> - تغییر تعداد کاربران پلن ویژه\n"
     text += "/delete_plan <id> - حذف پلن"
     
     await message.answer(text)
@@ -369,25 +371,108 @@ async def edit_normal_plan(message: Message):
     except Exception as e:
         await message.answer(f"❌ خطا: {e}")
 
-# ========== ویرایش پلن ویژه ==========
+# ========== ویرایش پلن ویژه (با پشتیبانی از برچسب فارسی) ==========
 @router.message(Command("edit_vip"))
 async def edit_vip_plan(message: Message):
     if not is_admin(message.from_user.id):
         return
     
-    parts = message.text.split(maxsplit=4)
-    if len(parts) != 5:
+    # حذف دستور و گرفتن متن
+    text = message.text.replace("/edit_vip", "").strip()
+    if not text:
+        await message.answer("❌ فرمت: /edit_vip <id> <برچسب> <قیمت> <تعداد کاربر>\nمثال: /edit_vip 1 VIP-ماهانه 250000 1\nیا: /edit_vip 1 VIP یکماهه نامحدود 250000 1")
+        return
+    
+    # پیدا کردن شناسه (اولین عدد)
+    parts = text.split()
+    if len(parts) < 4:
         await message.answer("❌ فرمت: /edit_vip <id> <برچسب> <قیمت> <تعداد کاربر>\nمثال: /edit_vip 1 VIP-ماهانه 250000 1")
         return
     
     try:
-        plan_id = int(parts[1])
-        label = parts[2]
-        price = int(parts[3])
-        user_count = int(parts[4])
+        plan_id = int(parts[0])
+        # بقیه متن به عنوان برچسب
+        # آخرین عدد قیمت و عدد قبل از آن تعداد کاربران است
+        # اما اگر برچسب شامل اعداد باشد، این روش ممکن است خطا دهد.
+        # بهتر است از جداکننده | استفاده کنیم
+        if '|' in text:
+            # فرمت با جداکننده: id|برچسب|قیمت|تعداد
+            parts2 = text.split('|')
+            if len(parts2) != 4:
+                await message.answer("❌ فرمت با | : id|برچسب|قیمت|تعداد\nمثال: /edit_vip 1|VIP یکماهه نامحدود|250000|1")
+                return
+            plan_id = int(parts2[0].strip())
+            label = parts2[1].strip()
+            price = int(parts2[2].strip())
+            user_count = int(parts2[3].strip())
+        else:
+            # فرمت معمولی: id برچسب قیمت تعداد
+            # پیدا کردن قیمت و تعداد از انتها
+            # فرض می‌کنیم دو عدد آخر قیمت و تعداد هستند
+            # پس برچسب همه چیز بین شناسه و دو عدد آخر است
+            price = int(parts[-2])
+            user_count = int(parts[-1])
+            label = ' '.join(parts[1:-2])
+            if not label:
+                await message.answer("❌ برچسب نمی‌تواند خالی باشد!")
+                return
         
         await db.update_vip_plan(plan_id, label, price, user_count)
         await message.answer(f"✅ پلن ویژه {plan_id} با موفقیت ویرایش شد!\n⭐ {label} | {price:,} تومان | 👤 {user_count} کاربر")
+    except Exception as e:
+        await message.answer(f"❌ خطا: {e}")
+
+# ========== تغییر تعداد کاربران پلن عادی ==========
+@router.message(Command("change_normal_users"))
+async def change_normal_users(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    
+    parts = message.text.split()
+    if len(parts) != 3:
+        await message.answer("❌ فرمت: /change_normal_users <id> <تعداد>\nمثال: /change_normal_users 1 5")
+        return
+    
+    try:
+        plan_id = int(parts[1])
+        new_count = int(parts[2])
+        
+        # دریافت پلن فعلی
+        plan = await db.get_normal_plan(plan_id)
+        if not plan:
+            await message.answer(f"❌ پلن عادی با شناسه {plan_id} یافت نشد!")
+            return
+        
+        plan_id, volume, price, _ = plan
+        await db.update_normal_plan(plan_id, volume, price, new_count)
+        await message.answer(f"✅ تعداد کاربران پلن عادی {plan_id} به {new_count} نفر تغییر یافت!\n📦 {volume} گیگ | {price:,} تومان | 👤 {new_count} کاربر")
+    except Exception as e:
+        await message.answer(f"❌ خطا: {e}")
+
+# ========== تغییر تعداد کاربران پلن ویژه ==========
+@router.message(Command("change_vip_users"))
+async def change_vip_users(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    
+    parts = message.text.split()
+    if len(parts) != 3:
+        await message.answer("❌ فرمت: /change_vip_users <id> <تعداد>\nمثال: /change_vip_users 1 5")
+        return
+    
+    try:
+        plan_id = int(parts[1])
+        new_count = int(parts[2])
+        
+        # دریافت پلن فعلی
+        plan = await db.get_vip_plan(plan_id)
+        if not plan:
+            await message.answer(f"❌ پلن ویژه با شناسه {plan_id} یافت نشد!")
+            return
+        
+        plan_id, label, price, _ = plan
+        await db.update_vip_plan(plan_id, label, price, new_count)
+        await message.answer(f"✅ تعداد کاربران پلن ویژه {plan_id} به {new_count} نفر تغییر یافت!\n⭐ {label} | {price:,} تومان | 👤 {new_count} کاربر")
     except Exception as e:
         await message.answer(f"❌ خطا: {e}")
 
