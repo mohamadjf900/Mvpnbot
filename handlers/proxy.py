@@ -11,7 +11,7 @@ async def proxy_menu(callback: CallbackQuery):
     await db.update_activity(callback.from_user.id)
     await db.log_usage(callback.from_user.id, "proxy")
     
-    proxies = await db.get_active_proxies(limit=50)
+    proxies = await db.get_active_proxies(limit=30)
     if not proxies:
         await callback.message.edit_text(
             "در حال حاضر پروکسی فعالی موجود نیست.\nلطفاً بعداً مراجعه کنید.",
@@ -19,17 +19,23 @@ async def proxy_menu(callback: CallbackQuery):
         )
         await callback.answer()
         return
-
+    
     builder = InlineKeyboardBuilder()
     for p in proxies:
-        button_text = p['remarks'] if p['remarks'] else p['url'][:30] + "..."
-        builder.add(InlineKeyboardButton(text=button_text, url=p['url']))
+        if "url" in p and p["url"]:
+            # لینک مستقیم
+            button_text = p['remarks'] if p['remarks'] else "پروکسی"
+            builder.add(InlineKeyboardButton(text=button_text, url=p['url']))
+        else:
+            # پروکسی معمولی
+            button_text = f"{p['type']} {p['ip']}:{p['port']}"
+            builder.add(InlineKeyboardButton(text=button_text, callback_data="proxy_info"))
     
     builder.adjust(1)
     builder.row(InlineKeyboardButton(text="🔙 بازگشت", callback_data="menu_main"))
     
     await callback.message.edit_text(
-        "🔹 روی هر پروکسی کلیک کنید تا در تلگرام فعال شود:",
+        "🔹 **پروکسی‌های فعال:**\nروی هر دکمه کلیک کنید تا پروکسی فعال شود.",
         reply_markup=builder.as_markup()
     )
     await callback.answer()
