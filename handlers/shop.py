@@ -187,7 +187,7 @@ async def buy_vip_callback(callback: CallbackQuery, state: FSMContext):
         logger.error(f"Error in buy_vip_callback: {e}")
         await callback.answer(f"❌ خطا: {e}", show_alert=True)
 
-# ========== دریافت رسید و ثبت سفارش ==========
+# ========== دریافت رسید و ثبت سفارش (با دکمه‌های اینلاین) ==========
 @router.message(BuyStates.waiting_for_receipt, F.photo)
 async def receive_receipt(message: Message, state: FSMContext):
     try:
@@ -199,7 +199,6 @@ async def receive_receipt(message: Message, state: FSMContext):
         
         file_id = message.photo[-1].file_id
         
-        # ========== ثبت سفارش در دیتابیس ==========
         order_id = await db.create_order(
             user_id=message.from_user.id,
             username=message.from_user.username or "Unknown",
@@ -215,15 +214,18 @@ async def receive_receipt(message: Message, state: FSMContext):
             await state.clear()
             return
         
-        # به‌روزرسانی وضعیت سفارش به receipt_sent
         await db.update_order_receipt(order_id, file_id)
-        
-        # ========== لاگ ==========
         logger.info(f"Order #{order_id} created by user {message.from_user.id}")
-        
         await state.clear()
         
-        # ========== اطلاع به ادمین ==========
+        # ========== ساخت دکمه‌های اینلاین برای ادمین ==========
+        admin_buttons = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ تأیید", callback_data=f"confirm_order_{order_id}"),
+             InlineKeyboardButton(text="❌ رد", callback_data=f"reject_order_{order_id}")],
+            [InlineKeyboardButton(text="📡 تحویل", callback_data=f"deliver_order_{order_id}")]
+        ])
+        
+        # ارسال به ادمین
         admin_sent = False
         for admin_id in config.ADMIN_IDS:
             try:
@@ -239,11 +241,8 @@ async def receive_receipt(message: Message, state: FSMContext):
 👥 تعداد کاربران: {data.get('user_count', 1)} نفر
 💰 قیمت: {data.get('price'):,} تومان
 📌 وضعیت: در انتظار تأیید
-
-✅ تأیید: /confirm_{order_id}
-❌ رد: /reject_{order_id}
-📡 تحویل: /deliver_{order_id} اطلاعات پنل
-"""
+""",
+                    reply_markup=admin_buttons
                 )
                 admin_sent = True
             except Exception as e:
