@@ -16,10 +16,8 @@ def main_menu_keyboard(user_id: int = None):
         [KeyboardButton(text="👥 دعوت دوستان"), KeyboardButton(text="🎫 تیکت پشتیبانی")],
         [KeyboardButton(text="📞 پشتیبانی"), KeyboardButton(text="📜 قوانین")],
     ]
-    # دکمه مدیریت ربات فقط برای ادمین
     if user_id and user_id in config.ADMIN_IDS:
         buttons.append([KeyboardButton(text="⚙️ مدیریت ربات")])
-    
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
 # ========== دستور /start ==========
@@ -30,7 +28,6 @@ async def start_handler(message: Message):
     await db.update_activity(user.id)
     await db.log_usage(user.id, "start")
     
-    # بررسی لینک دعوت
     args = message.text.split()
     if len(args) > 1 and args[1].startswith("ref_"):
         code = args[1][4:]
@@ -44,27 +41,27 @@ async def start_handler(message: Message):
     text = "به ربات VPN و پروکسی خوش آمدید!\nاز منوی زیر انتخاب کنید:"
     await message.answer(text, reply_markup=main_menu_keyboard(user.id))
 
-# ========== هندلرهای دکمه‌های منو ==========
+# ====================== دکمه‌های منو (Reply Keyboard) ======================
 
 @router.message(F.text == "🚀 پروکسی")
 async def proxy_button(message: Message):
-    await message.answer("🔹 لیست پروکسی‌ها در حال دریافت...")
-    # کد مربوط به نمایش پروکسی‌ها را اینجا قرار دهید
+    from handlers.proxy import proxy_menu_message
+    await proxy_menu_message(message)
 
 @router.message(F.text == "📡 V2Ray")
 async def v2ray_button(message: Message):
-    await message.answer("📡 لیست کانفیگ‌های V2Ray در حال دریافت...")
-    # کد مربوط به نمایش V2Ray را اینجا قرار دهید
+    from handlers.v2ray import v2ray_menu_message
+    await v2ray_menu_message(message)
 
 @router.message(F.text == "🔒 WireGuard")
 async def wireguard_button(message: Message):
-    await message.answer("🔒 لیست کانفیگ‌های WireGuard در حال دریافت...")
-    # کد مربوط به نمایش WireGuard را اینجا قرار دهید
+    from handlers.wireguard import wireguard_menu_message
+    await wireguard_menu_message(message)
 
 @router.message(F.text == "🎮 DNS")
 async def dns_button(message: Message):
-    await message.answer("🎮 لیست DNSهای پیشنهادی:\n...")
-    # کد مربوط به نمایش DNS را اینجا قرار دهید
+    from handlers.dns import dns_menu_message
+    await dns_menu_message(message)
 
 @router.message(F.text == "🛒 خرید سرویس")
 async def shop_button(message: Message):
@@ -84,8 +81,8 @@ async def invite_button(message: Message):
 
 @router.message(F.text == "🎫 تیکت پشتیبانی")
 async def ticket_button(message: Message):
-    from handlers.ticket import ticket_menu
-    await message.answer("🎫 سیستم پشتیبانی:\nبرای ایجاد تیکت جدید از دستور /ticket استفاده کنید.")
+    from handlers.ticket import ticket_menu_message
+    await ticket_menu_message(message)
 
 @router.message(F.text == "📞 پشتیبانی")
 async def support_button(message: Message):
@@ -102,5 +99,23 @@ async def admin_button(message: Message):
     if message.from_user.id not in config.ADMIN_IDS:
         await message.answer("❌ شما دسترسی ادمین ندارید!")
         return
-    text = "⚙️ **پنل مدیریت**\n\nدستورات موجود:\n/stats - آمار کاربران\n/broadcast - ارسال همگانی\n/backup - بکاپ دیتابیس\n/restore - بازیابی دیتابیس\n/orders - مشاهده سفارشات"
+    text = "⚙️ **پنل مدیریت**\n\nدستورات موجود:\n/stats - آمار کاربران\n/broadcast - ارسال همگانی\n/backup - بکاپ دیتابیس\n/restore - بازیابی دیتابیس\n/orders - مشاهده سفارشات\n/add_proxy - افزودن پروکسی\n/add_v2ray - افزودن V2Ray\n/add_wireguard - افزودن WireGuard"
     await message.answer(text, reply_markup=main_menu_keyboard(message.from_user.id))
+
+@router.callback_query(F.data == "menu_main")
+async def back_to_main(callback: CallbackQuery):
+    await callback.message.delete()
+    await callback.message.answer("منوی اصلی:", reply_markup=main_menu_keyboard(callback.from_user.id))
+    await callback.answer()
+
+@router.callback_query(F.data == "check_join")
+async def check_join_callback(callback: CallbackQuery, bot):
+    try:
+        member = await bot.get_chat_member(chat_id=config.CHANNEL_ID, user_id=callback.from_user.id)
+        if member.status not in ["left", "kicked"]:
+            await callback.message.delete()
+            await start_handler(callback.message)
+        else:
+            await callback.answer("❌ شما هنوز عضو نشده‌اید!", show_alert=True)
+    except:
+        await callback.answer("خطا در بررسی عضویت!", show_alert=True)
