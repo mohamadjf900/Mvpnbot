@@ -28,6 +28,7 @@ async def start_handler(message: Message):
     await db.update_activity(user.id)
     await db.log_usage(user.id, "start")
     
+    # بررسی لینک دعوت
     args = message.text.split()
     if len(args) > 1 and args[1].startswith("ref_"):
         code = args[1][4:]
@@ -66,7 +67,13 @@ async def dns_button(message: Message):
 @router.message(F.text == "🛒 خرید سرویس")
 async def shop_button(message: Message):
     from handlers.shop import services_kb
-    await message.answer("🛒 لطفاً نوع سرویس مورد نظر را انتخاب کنید:", reply_markup=services_kb())
+    await message.answer(
+        "🛒 **خرید سرویس**\n\n"
+        "لطفاً نوع سرویس مورد نظر را انتخاب کنید:\n"
+        "📦 عادی - مناسب کاربری روزمره\n"
+        "⭐ ویژه - سرعت و کیفیت بالاتر",
+        reply_markup=services_kb()
+    )
 
 @router.message(F.text == "💰 کیف پول")
 async def wallet_button(message: Message):
@@ -101,6 +108,8 @@ async def admin_button(message: Message):
         return
     text = "⚙️ **پنل مدیریت**\n\nدستورات موجود:\n/stats - آمار کاربران\n/broadcast - ارسال همگانی\n/backup - بکاپ دیتابیس\n/restore - بازیابی دیتابیس\n/orders - مشاهده سفارشات\n/add_proxy - افزودن پروکسی\n/add_v2ray - افزودن V2Ray\n/add_wireguard - افزودن WireGuard"
     await message.answer(text, reply_markup=main_menu_keyboard(message.from_user.id))
+
+# ====================== دکمه‌های Inline (برای بازگشت و عضویت) ======================
 
 @router.callback_query(F.data == "menu_main")
 async def back_to_main(callback: CallbackQuery):
