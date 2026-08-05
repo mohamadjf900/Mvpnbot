@@ -13,10 +13,7 @@ DB_PATH = "bot_database.db"
 def is_admin(user_id):
     return user_id in config.ADMIN_IDS
 
-# ============================================================
-# ====================== آمار و مدیریت ======================
-# ============================================================
-
+# ========== آمار ==========
 @router.message(Command("stats"))
 async def stats_command(message: Message):
     if not is_admin(message.from_user.id):
@@ -27,6 +24,7 @@ async def stats_command(message: Message):
     text = f"📊 **آمار ربات:**\n\n👥 کل کاربران: {total}\n📈 کاربران فعال امروز: {active_today}\n📈 کاربران فعال هفته: {active_week}"
     await message.answer(text)
 
+# ========== ارسال همگانی ==========
 @router.message(Command("broadcast"))
 async def broadcast_command(message: Message):
     if not is_admin(message.from_user.id):
@@ -46,10 +44,7 @@ async def broadcast_command(message: Message):
             fail += 1
     await message.answer(f"✅ ارسال شد: {success}\n❌ ناموفق: {fail}")
 
-# ============================================================
-# ====================== بکاپ و بازیابی ======================
-# ============================================================
-
+# ========== بکاپ و بازیابی ==========
 @router.message(Command("backup"))
 async def backup_db(message: Message):
     if not is_admin(message.from_user.id):
@@ -79,18 +74,16 @@ async def restore_db(message: Message):
     except Exception as e:
         await message.answer(f"❌ خطا در بازیابی: {e}")
 
-# ============================================================
-# ====================== مدیریت پروکسی ======================
-# ============================================================
-
+# ========== اضافه کردن پروکسی ==========
 @router.message(Command("add_proxy"))
 async def add_proxy_command(message: Message):
     if not is_admin(message.from_user.id):
         return
-    
     text = message.text.replace("/add_proxy", "").strip()
+    if not text:
+        await message.answer("❌ فرمت: /add_proxy HTTP 1.2.3.4 8080 یا /add_proxy https://t.me/proxy?server=...&port=... توضیحات")
+        return
     
-    # تشخیص فرمت لینک مستقیم تخصصی پروکسی تلگرام
     if text.startswith("https://t.me/proxy?"):
         parts = text.split(maxsplit=1)
         url = parts[0].strip()
@@ -99,24 +92,17 @@ async def add_proxy_command(message: Message):
             await db.add_proxy(None, None, None, url, remarks)
             await message.answer(f"✅ پروکسی لینک با نام «{remarks}» اضافه شد.")
         except Exception as e:
-            await message.answer(f"خطا: {e}")
+            await message.answer(f"❌ خطا: {e}")
         return
     
-    # فرمت معمولی type ip port
     args = text.split()
     if len(args) != 3:
-        await message.answer(
-            "❌ فرمت صحیح:\n"
-            "1. برای پروکسی معمولی:\n`/add_proxy HTTP 1.2.3.4 8080`\n"
-            "2. برای لینک مخصوص تلگرام:\n`/add_proxy https://t.me/proxy?server=...&port=...&secret=... توضیحات`"
-        )
+        await message.answer("❌ فرمت: /add_proxy <type> <ip> <port>")
         return
-    
     ptype, ip, port = args
     if not re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', ip):
         await message.answer("❌ فرمت IP نامعتبر است!")
         return
-    
     try:
         port = int(port)
         if port < 1 or port > 65535:
@@ -125,120 +111,9 @@ async def add_proxy_command(message: Message):
         await db.add_proxy(ptype.upper(), ip, port)
         await message.answer(f"✅ پروکسی {ptype} {ip}:{port} اضافه شد.")
     except Exception as e:
-        await message.answer(f"خطا: {e}")
+        await message.answer(f"❌ خطا: {e}")
 
-@router.message(Command("add_proxies"))
-async def add_proxies_command(message: Message):
-    if not is_admin(message.from_user.id):
-        return
-    
-    text = message.text.replace("/add_proxies", "").strip()
-    if not text:
-        await message.answer(
-            "❌ لطفاً لیست پروکسی‌ها را ارسال کنید.\n"
-            "فرمت صحیح:\n"
-            "هر خط یک پروکسی به فرمت `type ip port` یا لینک `https://t.me/proxy?...`"
-        )
-        return
-    
-    lines = text.split('\n')
-    added = 0
-    errors = []
-    
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        
-        if line.startswith("https://t.me/proxy?"):
-            if '|' in line:
-                url, remarks = line.split('|', 1)
-                url = url.strip()
-                remarks = remarks.strip()
-            else:
-                url = line
-                remarks = "Proxy"
-            try:
-                await db.add_proxy(None, None, None, url, remarks)
-                added += 1
-            except Exception as e:
-                errors.append(f"خطا در افزودن {url[:30]}... : {e}")
-            continue
-        
-        parts = line.split()
-        if len(parts) != 3:
-            errors.append(f"❌ خطای فرمت: {line}")
-            continue
-        
-        ptype, ip, port = parts
-        if not re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', ip):
-            errors.append(f"❌ IP نامعتبر: {ip}")
-            continue
-        
-        try:
-            port = int(port)
-            if port < 1 or port > 65535:
-                errors.append(f"❌ پورت نامعتبر: {port}")
-                continue
-            await db.add_proxy(ptype.upper(), ip, port)
-            added += 1
-        except Exception as e:
-            errors.append(f"خطا در افزودن {line}: {e}")
-    
-    result = f"✅ {added} پروکسی با موفقیت اضافه شد."
-    if errors:
-        result += f"\n\n❌ خطاها ({len(errors)} مورد):\n" + "\n".join(errors[:5])
-    await message.answer(result)
-
-@router.message(Command("list_proxies"))
-async def list_proxies_command(message: Message):
-    if not is_admin(message.from_user.id):
-        return
-    proxies = await db.get_all_proxies()
-    if not proxies:
-        await message.answer("📭 هیچ پروکسی‌ای در دیتابیس وجود ندارد.")
-        return
-    text = "📋 **لیست پروکسی‌ها:**\n\n"
-    for p in proxies[:50]:
-        status = "🟢" if p['is_active'] else "🔴"
-        if p['url']:
-            text += f"{status} #{p['id']} 🔗 {p['remarks']}: {p['url'][:40]}...\n"
-        else:
-            text += f"{status} #{p['id']} {p['type']} {p['ip']}:{p['port']}\n"
-    await message.answer(text[:4000])
-
-@router.message(Command("delete_proxy"))
-async def delete_proxy_command(message: Message):
-    if not is_admin(message.from_user.id):
-        return
-    args = message.text.split()
-    if len(args) != 2:
-        await message.answer("فرمت: /delete_proxy <id>")
-        return
-    try:
-        proxy_id = int(args[1])
-        await db.delete_proxy(proxy_id)
-        await message.answer(f"✅ پروکسی #{proxy_id} حذف شد.")
-    except Exception as e:
-        await message.answer(f"خطا: {e}")
-
-@router.message(Command("clear_proxies"))
-async def clear_proxies_command(message: Message):
-    if not is_admin(message.from_user.id):
-        return
-    await db.delete_all_proxies()
-    await message.answer("✅ تمام پروکسی‌ها حذف شدند.")
-
-# ============================================================
-# ====================== مدیریت V2Ray ======================
-# ============================================================
-
-def is_valid_v2ray_link(link: str) -> bool:
-    return any(link.startswith(prefix) for prefix in [
-        'vless://', 'vmess://', 'trojan://', 'ss://',
-        'https://shadowmere.xyz', 'https://t.me/'
-    ])
-
+# ========== اضافه کردن V2Ray ==========
 def extract_remarks_from_link(link: str) -> str:
     if '#' in link:
         return link.split('#', 1)[1].strip()
@@ -254,11 +129,7 @@ async def add_v2ray_command(message: Message):
         return
     text = message.text.replace("/add_v2ray", "", 1).strip()
     if not text:
-        await message.answer(
-            "❌ لطفاً لینک V2Ray را ارسال کنید.\n"
-            "مثال: `/add_v2ray vless://...@...`\n"
-            "یا: `/add_v2ray https://shadowmere.xyz/api/b64sub/ توضیحات`"
-        )
+        await message.answer("❌ لطفاً لینک V2Ray را ارسال کنید.\nمثال: `/add_v2ray vless://...@... توضیحات`")
         return
     parts = text.split(maxsplit=1)
     link = parts[0].strip()
@@ -269,105 +140,35 @@ async def add_v2ray_command(message: Message):
     except Exception as e:
         await message.answer(f"❌ خطا: {e}")
 
-@router.message(Command("add_v2rays"))
-async def add_v2rays_command(message: Message):
-    if not is_admin(message.from_user.id):
-        return
-    text = message.text.replace("/add_v2rays", "", 1).strip()
-    if not text:
-        await message.answer("❌ لطفاً لیست کانفیگ‌های V2Ray را ارسال کنید.\nفرمت: `link|remarks` (هر خط یک کانفیگ)")
-        return
-    lines = text.split('\n')
-    added = 0
-    errors = []
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        if '|' in line:
-            link, remarks = line.split('|', 1)
-            link = link.strip()
-            remarks = remarks.strip()
-        else:
-            link = line
-            remarks = extract_remarks_from_link(link)
-        try:
-            await db.add_v2ray(link, remarks)
-            added += 1
-        except Exception as e:
-            errors.append(f"خطا در افزودن {link[:30]}... : {e}")
-    result = f"✅ {added} کانفیگ V2Ray اضافه شد."
-    if errors:
-        result += f"\n\n❌ خطاها ({len(errors)} مورد):\n" + "\n".join(errors[:5])
-    await message.answer(result)
-
-@router.message(Command("clear_v2ray"))
-async def clear_v2ray_command(message: Message):
-    if not is_admin(message.from_user.id):
-        return
-    await db.delete_all_v2ray()
-    await message.answer("✅ تمام کانفیگ‌های V2Ray حذف شدند.")
-
-# ============================================================
-# ====================== مدیریت WireGuard ======================
-# ============================================================
-
+# ========== اضافه کردن WireGuard ==========
 @router.message(Command("add_wireguard"))
 async def add_wireguard_command(message: Message):
     if not is_admin(message.from_user.id):
         return
     parts = message.text.split(maxsplit=2)
     if len(parts) < 3:
-        await message.answer("فرمت: /add_wireguard <config_text> <remarks>")
+        await message.answer("❌ فرمت: /add_wireguard <config_text> <remarks>")
         return
     _, config_text, remarks = parts
     try:
         await db.add_wireguard(config_text, remarks)
         await message.answer(f"✅ کانفیگ WireGuard با نام «{remarks}» اضافه شد.")
     except Exception as e:
-        await message.answer(f"خطا: {e}")
+        await message.answer(f"❌ خطا: {e}")
 
-@router.message(Command("add_wireguards"))
-async def add_wireguards_command(message: Message):
+# ========== سفارشات ==========
+@router.message(Command("orders"))
+async def list_orders(message: Message):
     if not is_admin(message.from_user.id):
         return
-    text = message.text.replace("/add_wireguards", "").strip()
-    if not text:
-        await message.answer("لطفاً لیست کانفیگ‌های WireGuard را به فرمت config|remarks ارسال کنید.")
+    orders = await db.get_all_pending_orders()
+    if not orders:
+        await message.answer("📭 هیچ سفارش در انتظار تأییدی وجود ندارد.")
         return
-    lines = text.split('\n')
-    added = 0
-    errors = []
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        if '|' not in line:
-            errors.append(f"خطای فرمت (| یافت نشد): {line}")
-            continue
-        config_text, remarks = line.split('|', 1)
-        config_text = config_text.strip()
-        remarks = remarks.strip()
-        try:
-            await db.add_wireguard(config_text, remarks)
-            added += 1
-        except Exception as e:
-            errors.append(f"خطا در افزودن {remarks}: {e}")
-    result = f"✅ {added} کانفیگ WireGuard اضافه شد."
-    if errors:
-        result += "\n\n❌ خطاها:\n" + "\n".join(errors[:5])
-    await message.answer(result)
-
-@router.message(Command("clear_wireguard"))
-async def clear_wireguard_command(message: Message):
-    if not is_admin(message.from_user.id):
-        return
-    await db.delete_all_wireguard()
-    await message.answer("✅ تمام کانفیگ‌های WireGuard حذف شدند.")
-
-# ============================================================
-# ====================== مدیریت سفارشات ======================
-# ============================================================
+    text = "📋 **سفارش‌های در انتظار تأیید:**\n\n"
+    for o in orders[:20]:
+        text += f"🆔 #{o[0]} | 👤 {o[3]} | 📦 {o[5]} | 💰 {o[4]:,} تومان\n"
+    await message.answer(text[:4000])
 
 @router.message(Command("confirm_"))
 async def confirm_order(message: Message):
@@ -377,16 +178,12 @@ async def confirm_order(message: Message):
         order_id = int(message.text.split("_")[1])
         await db.update_order_status(order_id, "confirmed")
         await message.answer(f"✅ سفارش #{order_id} تأیید شد.")
-        
         async with aiosqlite.connect(db.DB_PATH) as conn:
             cursor = await conn.execute("SELECT user_id FROM orders WHERE id = ?", (order_id,))
             row = await cursor.fetchone()
             if row:
                 try:
-                    await message.bot.send_message(
-                        row[0],
-                        f"✅ سفارش شما #{order_id} تأیید شد!\nبه زودی اطلاعات پنل برای شما ارسال می‌شود."
-                    )
+                    await message.bot.send_message(row[0], f"✅ سفارش شما #{order_id} تأیید شد!")
                 except:
                     pass
     except:
@@ -400,16 +197,12 @@ async def reject_order(message: Message):
         order_id = int(message.text.split("_")[1])
         await db.update_order_status(order_id, "rejected")
         await message.answer(f"❌ سفارش #{order_id} رد شد.")
-        
         async with aiosqlite.connect(db.DB_PATH) as conn:
             cursor = await conn.execute("SELECT user_id FROM orders WHERE id = ?", (order_id,))
             row = await cursor.fetchone()
             if row:
                 try:
-                    await message.bot.send_message(
-                        row[0],
-                        f"❌ سفارش شما #{order_id} رد شد.\nبرای اطلاعات بیشتر با پشتیبانی تماس بگیرید."
-                    )
+                    await message.bot.send_message(row[0], f"❌ سفارش شما #{order_id} رد شد.")
                 except:
                     pass
     except:
@@ -428,32 +221,35 @@ async def deliver_order(message: Message):
         panel_info = parts[1] + " " + parts[2] if len(parts) > 2 else parts[1]
         await db.update_order_status(order_id, "delivered", panel_info)
         await message.answer(f"✅ سفارش #{order_id} تحویل داده شد.")
-        
         async with aiosqlite.connect(db.DB_PATH) as conn:
             cursor = await conn.execute("SELECT user_id FROM orders WHERE id = ?", (order_id,))
             row = await cursor.fetchone()
             if row:
                 try:
-                    await message.bot.send_message(
-                        row[0],
-                        f"🚀 **سفارش شما #{order_id} تحویل داده شد!**\n\n"
-                        f"📡 اطلاعات پنل:\n{panel_info}\n\n"
-                        f"برای راهنمایی بیشتر با پشتیبانی تماس بگیرید."
-                    )
+                    await message.bot.send_message(row[0], f"🚀 سفارش #{order_id} تحویل شد!\n📡 {panel_info}")
                 except:
                     pass
     except:
         await message.answer("❌ خطا در تحویل سفارش.")
 
-@router.message(Command("orders"))
-async def list_orders(message: Message):
+# ========== پاک کردن ==========
+@router.message(Command("clear_proxies"))
+async def clear_proxies(message: Message):
     if not is_admin(message.from_user.id):
         return
-    orders = await db.get_all_pending_orders()
-    if not orders:
-        await message.answer("📭 هیچ سفارش در انتظار تأییدی وجود ندارد.")
+    await db.delete_all_proxies()
+    await message.answer("✅ تمام پروکسی‌ها حذف شدند.")
+
+@router.message(Command("clear_v2ray"))
+async def clear_v2ray(message: Message):
+    if not is_admin(message.from_user.id):
         return
-    text = "📋 **سفارش‌های در انتظار تأیید:**\n\n"
-    for o in orders[:20]:
-        text += f"🆔 #{o[0]} | 👤 {o[3]} | 📦 {o[5]} | 💰 {o[4]:,} تومان\n"
-    await message.answer(text[:4000])
+    await db.delete_all_v2ray()
+    await message.answer("✅ تمام کانفیگ‌های V2Ray حذف شدند.")
+
+@router.message(Command("clear_wireguard"))
+async def clear_wireguard(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    await db.delete_all_wireguard()
+    await message.answer("✅ تمام کانفیگ‌های WireGuard حذف شدند.")
