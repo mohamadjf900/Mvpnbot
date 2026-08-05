@@ -1,6 +1,9 @@
 import aiosqlite
 import secrets
 from datetime import datetime
+import logging
+
+logger = logging.getLogger(__name__)
 
 DB_PATH = "bot_database.db"
 
@@ -461,193 +464,300 @@ async def get_referral_details(user_id: int):
 async def create_order(user_id: int, username: str, full_name: str, plan_id: int, 
                        plan_name: str, price: int, user_count: int = 1,
                        coupon_code: str = None, original_price: int = None) -> int:
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute('''
-            INSERT INTO orders (
-                user_id, username, full_name, plan_id, plan_name, price, user_count,
-                coupon_code, original_price, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            RETURNING id
-        ''', (user_id, username, full_name, plan_id, plan_name, price, user_count,
-              coupon_code, original_price or price, datetime.now().isoformat()))
-        row = await cursor.fetchone()
-        await db.commit()
-        return row[0] if row else None
-
-async def get_user_orders(user_id: int):
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute('''
-            SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC
-        ''', (user_id,))
-        rows = await cursor.fetchall()
-        return rows
-
-async def get_all_pending_orders():
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute('''
-            SELECT * FROM orders WHERE status = 'pending' ORDER BY created_at DESC
-        ''')
-        rows = await cursor.fetchall()
-        return rows
-
-async def update_order_status(order_id: int, status: str, panel_info: str = None):
-    async with aiosqlite.connect(DB_PATH) as db:
-        if panel_info:
-            await db.execute('''
-                UPDATE orders SET status = ?, panel_info = ? WHERE id = ?
-            ''', (status, panel_info, order_id))
-        else:
-            await db.execute('''
-                UPDATE orders SET status = ? WHERE id = ?
-            ''', (status, order_id))
-        await db.commit()
+    """ایجاد سفارش جدید و برگرداندن شناسه سفارش"""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            cursor = await db.execute('''
+                INSERT INTO orders (
+                    user_id, username, full_name, plan_id, plan_name, price, user_count,
+                    coupon_code, original_price, created_at, status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                RETURNING id
+            ''', (
+                user_id, 
+                username or "Unknown", 
+                full_name or "Unknown", 
+                plan_id, 
+                plan_name, 
+                price, 
+                user_count,
+                coupon_code, 
+                original_price or price, 
+                datetime.now().isoformat(),
+                "pending"
+            ))
+            row = await cursor.fetchone()
+            await db.commit()
+            return row[0] if row else None
+    except Exception as e:
+        logger.error(f"Error creating order: {e}")
+        return None
 
 async def update_order_receipt(order_id: int, file_id: str):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute('''
-            UPDATE orders SET receipt_file_id = ?, status = 'receipt_sent' WHERE id = ?
-        ''', (file_id, order_id))
-        await db.commit()
+    """ثبت رسید سفارش و تغییر وضعیت به receipt_sent"""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute('''
+                UPDATE orders SET receipt_file_id = ?, status = 'receipt_sent' WHERE id = ?
+            ''', (file_id, order_id))
+            await db.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Error updating receipt: {e}")
+        return False
+
+async def get_user_orders(user_id: int):
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            cursor = await db.execute('''
+                SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC
+            ''', (user_id,))
+            rows = await cursor.fetchall()
+            return rows
+    except Exception as e:
+        logger.error(f"Error getting user orders: {e}")
+        return []
+
+async def get_all_pending_orders():
+    """دریافت همه سفارش‌های در انتظار تأیید"""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            cursor = await db.execute('''
+                SELECT * FROM orders 
+                WHERE status IN ('pending', 'receipt_sent') 
+                ORDER BY created_at DESC
+            ''')
+            rows = await cursor.fetchall()
+            return rows
+    except Exception as e:
+        logger.error(f"Error getting pending orders: {e}")
+        return []
+
+async def update_order_status(order_id: int, status: str, panel_info: str = None):
+    """به‌روزرسانی وضعیت سفارش"""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            if panel_info:
+                await db.execute('''
+                    UPDATE orders SET status = ?, panel_info = ? WHERE id = ?
+                ''', (status, panel_info, order_id))
+            else:
+                await db.execute('''
+                    UPDATE orders SET status = ? WHERE id = ?
+                ''', (status, order_id))
+            await db.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Error updating order status: {e}")
+        return False
 
 # ============================================================
 # ====================== توابع کیف پول ======================
 # ============================================================
 
 async def get_wallet_balance(user_id: int) -> int:
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute(
-            "SELECT balance FROM wallets WHERE user_id = ?", (user_id,)
-        )
-        row = await cursor.fetchone()
-        return row[0] if row else 0
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            cursor = await db.execute(
+                "SELECT balance FROM wallets WHERE user_id = ?", (user_id,)
+            )
+            row = await cursor.fetchone()
+            return row[0] if row else 0
+    except Exception as e:
+        logger.error(f"Error getting wallet balance: {e}")
+        return 0
 
 async def add_wallet_balance(user_id: int, amount: int):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute('''
-            INSERT INTO wallets (user_id, balance) VALUES (?, ?)
-            ON CONFLICT(user_id) DO UPDATE SET balance = balance + ?
-        ''', (user_id, amount, amount))
-        await db.commit()
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute('''
+                INSERT INTO wallets (user_id, balance) VALUES (?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET balance = balance + ?
+            ''', (user_id, amount, amount))
+            await db.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Error adding wallet balance: {e}")
+        return False
 
 # ============================================================
 # ====================== توابع کوپن ======================
 # ============================================================
 
 async def get_coupon(code: str):
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute(
-            "SELECT * FROM coupons WHERE code = ?", (code.upper(),)
-        )
-        row = await cursor.fetchone()
-        return row
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            cursor = await db.execute(
+                "SELECT * FROM coupons WHERE code = ?", (code.upper(),)
+            )
+            row = await cursor.fetchone()
+            return row
+    except Exception as e:
+        logger.error(f"Error getting coupon: {e}")
+        return None
 
 async def use_coupon(code: str) -> bool:
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute('''
-            SELECT max_uses, used_count, active FROM coupons WHERE code = ?
-        ''', (code.upper(),))
-        row = await cursor.fetchone()
-        if not row:
-            return False
-        max_uses, used_count, active = row
-        if not active:
-            return False
-        if max_uses and used_count >= max_uses:
-            return False
-        await db.execute('''
-            UPDATE coupons SET used_count = used_count + 1 WHERE code = ?
-        ''', (code.upper(),))
-        await db.commit()
-        return True
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            cursor = await db.execute('''
+                SELECT max_uses, used_count, active FROM coupons WHERE code = ?
+            ''', (code.upper(),))
+            row = await cursor.fetchone()
+            if not row:
+                return False
+            max_uses, used_count, active = row
+            if not active:
+                return False
+            if max_uses and used_count >= max_uses:
+                return False
+            await db.execute('''
+                UPDATE coupons SET used_count = used_count + 1 WHERE code = ?
+            ''', (code.upper(),))
+            await db.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Error using coupon: {e}")
+        return False
 
 # ============================================================
 # ====================== توابع پلن‌ها ======================
 # ============================================================
 
 async def get_normal_plans():
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute(
-            "SELECT id, volume_gb, price, user_count FROM normal_plans WHERE active = 1 ORDER BY volume_gb ASC"
-        )
-        rows = await cursor.fetchall()
-        return rows
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            cursor = await db.execute(
+                "SELECT id, volume_gb, price, user_count FROM normal_plans WHERE active = 1 ORDER BY volume_gb ASC"
+            )
+            rows = await cursor.fetchall()
+            return rows
+    except Exception as e:
+        logger.error(f"Error getting normal plans: {e}")
+        return []
 
 async def get_normal_plan(plan_id: int):
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute(
-            "SELECT id, volume_gb, price, user_count FROM normal_plans WHERE id = ? AND active = 1",
-            (plan_id,)
-        )
-        row = await cursor.fetchone()
-        return row
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            cursor = await db.execute(
+                "SELECT id, volume_gb, price, user_count FROM normal_plans WHERE id = ? AND active = 1",
+                (plan_id,)
+            )
+            row = await cursor.fetchone()
+            return row
+    except Exception as e:
+        logger.error(f"Error getting normal plan: {e}")
+        return None
 
 async def get_vip_plans():
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute(
-            "SELECT id, label, price, user_count FROM vip_plans WHERE active = 1 ORDER BY price ASC"
-        )
-        rows = await cursor.fetchall()
-        return rows
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            cursor = await db.execute(
+                "SELECT id, label, price, user_count FROM vip_plans WHERE active = 1 ORDER BY price ASC"
+            )
+            rows = await cursor.fetchall()
+            return rows
+    except Exception as e:
+        logger.error(f"Error getting vip plans: {e}")
+        return []
 
 async def get_vip_plan(plan_id: int):
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute(
-            "SELECT id, label, price, user_count FROM vip_plans WHERE id = ? AND active = 1",
-            (plan_id,)
-        )
-        row = await cursor.fetchone()
-        return row
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            cursor = await db.execute(
+                "SELECT id, label, price, user_count FROM vip_plans WHERE id = ? AND active = 1",
+                (plan_id,)
+            )
+            row = await cursor.fetchone()
+            return row
+    except Exception as e:
+        logger.error(f"Error getting vip plan: {e}")
+        return None
 
 async def update_normal_plan(plan_id: int, volume_gb: int, price: int, user_count: int):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "UPDATE normal_plans SET volume_gb = ?, price = ?, user_count = ? WHERE id = ?",
-            (volume_gb, price, user_count, plan_id)
-        )
-        await db.commit()
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                "UPDATE normal_plans SET volume_gb = ?, price = ?, user_count = ? WHERE id = ?",
+                (volume_gb, price, user_count, plan_id)
+            )
+            await db.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Error updating normal plan: {e}")
+        return False
 
 async def update_vip_plan(plan_id: int, label: str, price: int, user_count: int):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "UPDATE vip_plans SET label = ?, price = ?, user_count = ? WHERE id = ?",
-            (label, price, user_count, plan_id)
-        )
-        await db.commit()
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                "UPDATE vip_plans SET label = ?, price = ?, user_count = ? WHERE id = ?",
+                (label, price, user_count, plan_id)
+            )
+            await db.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Error updating vip plan: {e}")
+        return False
 
 async def add_normal_plan(volume_gb: int, price: int, user_count: int = 1):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "INSERT INTO normal_plans (volume_gb, price, user_count) VALUES (?, ?, ?)",
-            (volume_gb, price, user_count)
-        )
-        await db.commit()
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                "INSERT INTO normal_plans (volume_gb, price, user_count) VALUES (?, ?, ?)",
+                (volume_gb, price, user_count)
+            )
+            await db.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Error adding normal plan: {e}")
+        return False
 
 async def add_vip_plan(label: str, price: int, user_count: int = 1):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "INSERT INTO vip_plans (label, price, user_count) VALUES (?, ?, ?)",
-            (label, price, user_count)
-        )
-        await db.commit()
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                "INSERT INTO vip_plans (label, price, user_count) VALUES (?, ?, ?)",
+                (label, price, user_count)
+            )
+            await db.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Error adding vip plan: {e}")
+        return False
 
 async def delete_normal_plan(plan_id: int):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("DELETE FROM normal_plans WHERE id = ?", (plan_id,))
-        await db.commit()
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("DELETE FROM normal_plans WHERE id = ?", (plan_id,))
+            await db.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Error deleting normal plan: {e}")
+        return False
 
 async def delete_vip_plan(plan_id: int):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("DELETE FROM vip_plans WHERE id = ?", (plan_id,))
-        await db.commit()
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("DELETE FROM vip_plans WHERE id = ?", (plan_id,))
+            await db.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Error deleting vip plan: {e}")
+        return False
 
 # ============================================================
 # ====================== توابع لاگ ======================
 # ============================================================
 
 async def log_usage(user_id: int, section: str):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "INSERT INTO usage_logs (user_id, section) VALUES (?, ?)",
-            (user_id, section)
-        )
-        await db.commit()
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                "INSERT INTO usage_logs (user_id, section) VALUES (?, ?)",
+                (user_id, section)
+            )
+            await db.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Error logging usage: {e}")
+        return False
