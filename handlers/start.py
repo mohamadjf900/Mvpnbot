@@ -13,11 +13,10 @@ async def main_menu_keyboard():
     builder.button(text="📡 V2Ray", callback_data="menu_v2ray")
     builder.button(text="🔒 WireGuard", callback_data="menu_wireguard")
     builder.button(text="🎮 DNS گیمرها", callback_data="menu_dns")
-    builder.button(text="🎫 تیکت پشتیبانی", callback_data="menu_ticket")  # دکمه تیکت
     builder.button(text="💼 خرید", callback_data="menu_buy")
     builder.button(text="📞 پشتیبانی", callback_data="menu_support")
-    builder.button(text="📢 کانال ما", url=config.CHANNEL_LINK)
-    builder.adjust(2, 2, 2, 1, 1)  # چینش: ۲-۲-۲-۱-۱
+    builder.button(text="👥 دعوت دوستان", callback_data="menu_invite")  # دکمه جدید
+    builder.adjust(2)
     return builder.as_markup()
 
 @router.message(Command("start"))
@@ -25,6 +24,26 @@ async def start_handler(message: Message):
     user = message.from_user
     await db.add_user(user.id, user.username, user.first_name)
     await db.update_activity(user.id)
+    await db.log_usage(user.id, "start")
+    
+    # ====== بررسی لینک دعوت ======
+    args = message.text.split()
+    if len(args) > 1 and args[1].startswith("ref_"):
+        code = args[1][4:]  # حذف ref_
+        # پیدا کردن کاربر دعوت‌کننده
+        async with aiosqlite.connect(db.DB_PATH) as conn:
+            async with conn.execute(
+                "SELECT user_id FROM referrals WHERE code = ?",
+                (code,)
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row and row[0] != message.from_user.id:
+                    await db.register_referral(row[0], message.from_user.id)
+                    await message.answer("🎉 شما با موفقیت توسط دوست خود دعوت شدید!\nیک کانفیگ اختصاصی به حساب شما اضافه شد.")
+                elif row and row[0] == message.from_user.id:
+                    await message.answer("🔁 شما نمی‌توانید خودتان را دعوت کنید!")
+    
+    # ====== پیام خوش‌آمدگویی ======
     text = "به ربات VPN و پروکسی خوش آمدید!\nاز منوی زیر انتخاب کنید:"
     await message.answer(text, reply_markup=await main_menu_keyboard())
 
