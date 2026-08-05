@@ -5,68 +5,78 @@ DB_PATH = "bot_database.db"
 
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
-        # جدول کاربران
+        # ====== جدول کاربران ======
         await db.execute('''
             CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER UNIQUE,
+                user_id INTEGER PRIMARY KEY,
                 username TEXT,
                 first_name TEXT,
                 joined_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 last_activity TIMESTAMP,
-                is_admin BOOLEAN DEFAULT 0,
                 is_blocked BOOLEAN DEFAULT 0
             )
         ''')
-        # جدول پروکسی
+        
+        # ====== جدول پروکسی ======
         await db.execute('''
             CREATE TABLE IF NOT EXISTS proxies (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 type TEXT,
                 ip TEXT,
                 port INTEGER,
-                last_checked TIMESTAMP,
+                url TEXT,
+                remarks TEXT,
+                added_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 is_active BOOLEAN DEFAULT 1
             )
         ''')
-        # جدول کانفیگ V2Ray
+        
+        # ====== جدول V2Ray ======
         await db.execute('''
-            CREATE TABLE IF NOT EXISTS v2ray_configs (
+            CREATE TABLE IF NOT EXISTS v2ray (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 link TEXT UNIQUE,
                 remarks TEXT,
                 added_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
-        # جدول کانفیگ WireGuard
+        
+        # ====== جدول WireGuard ======
         await db.execute('''
-            CREATE TABLE IF NOT EXISTS wireguard_configs (
+            CREATE TABLE IF NOT EXISTS wireguard (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                config_text TEXT UNIQUE,
+                config TEXT UNIQUE,
                 remarks TEXT,
                 added_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
-        # جدول DNS
+        
+        # ====== جدول تیکت‌ها ======
         await db.execute('''
-            CREATE TABLE IF NOT EXISTS dns_servers (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT,
-                primary_dns TEXT,
-                secondary_dns TEXT,
-                for_gaming BOOLEAN DEFAULT 0
-            )
-        ''')
-        # جدول لاگ استفاده
-        await db.execute('''
-            CREATE TABLE IF NOT EXISTS usage_log (
+            CREATE TABLE IF NOT EXISTS tickets (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER,
-                command TEXT,
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                subject TEXT,
+                status TEXT DEFAULT 'open',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
-        # ====== جداول جدید سیستم دعوت ======
+        
+        # ====== جدول پیام‌های تیکت ======
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS ticket_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticket_id INTEGER,
+                sender_id INTEGER,
+                message TEXT,
+                file_id TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (ticket_id) REFERENCES tickets (id) ON DELETE CASCADE
+            )
+        ''')
+        
+        # ====== جدول رفرال ======
         await db.execute('''
             CREATE TABLE IF NOT EXISTS referrals (
                 user_id INTEGER PRIMARY KEY,
@@ -82,6 +92,17 @@ async def init_db():
                 registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        
+        # ====== جدول لاگ ======
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS usage_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                section TEXT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
         await db.commit()
 
 # ========== توابع کاربران ==========
@@ -122,97 +143,150 @@ async def get_all_users():
             rows = await cursor.fetchall()
             return [row[0] for row in rows]
 
-# ========== توابع پروکسی ==========
-async def add_proxy(proxy_type: str, ip: str, port: int):
+# ========== توابع پروکسی (اصلاح‌شده) ==========
+async def add_proxy(proxy_type: str, ip: str, port: int, url: str = None, remarks: str = None):
+    """افزودن پروکسی با پشتیبانی از لینک مستقیم"""
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "INSERT OR IGNORE INTO proxies (type, ip, port, last_checked, is_active) VALUES (?, ?, ?, CURRENT_TIMESTAMP, 1)",
-            (proxy_type, ip, port)
-        )
+        if url:
+            # لینک مستقیم (مثل https://t.me/proxy?...)
+            await db.execute(
+                "INSERT OR IGNORE INTO proxies (url, remarks, added_date, is_active) VALUES (?, ?, CURRENT_TIMESTAMP, 1)",
+                (url, remarks or "Proxy")
+            )
+        else:
+            # پروکسی معمولی با IP و پورت
+            await db.execute(
+                "INSERT OR IGNORE INTO proxies (type, ip, port, added_date, is_active) VALUES (?, ?, ?, CURRENT_TIMESTAMP, 1)",
+                (proxy_type.upper(), ip, port)
+            )
         await db.commit()
 
-async def get_active_proxies(limit: int = 10):
+async def get_active_proxies(limit: int = 50):
+    """دریافت پروکسی‌های فعال (اولویت با لینک‌های مستقیم)"""
     async with aiosqlite.connect(DB_PATH) as db:
+        # اول پروکسی‌های دارای لینک مستقیم
         async with db.execute(
-            "SELECT type, ip, port FROM proxies WHERE is_active = 1 ORDER BY RANDOM() LIMIT ?",
+            "SELECT url, remarks FROM proxies WHERE is_active = 1 AND url IS NOT NULL ORDER BY RANDOM() LIMIT ?",
             (limit,)
         ) as cursor:
             rows = await cursor.fetchall()
-            return [{"type": row[0], "ip": row[1], "port": row[2]} for row in rows]
+            results = [{"url": row[0], "remarks": row[1]} for row in rows]
+        
+        # اگر تعداد کافی نبود، پروکسی‌های معمولی را اضافه کن
+        if len(results) < limit:
+            remaining = limit - len(results)
+            async with db.execute(
+                "SELECT type, ip, port FROM proxies WHERE is_active = 1 AND url IS NULL ORDER BY RANDOM() LIMIT ?",
+                (remaining,)
+            ) as cursor2:
+                rows2 = await cursor2.fetchall()
+                for row in rows2:
+                    results.append({"type": row[0], "ip": row[1], "port": row[2]})
+        return results
 
 async def delete_all_proxies():
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("DELETE FROM proxies")
         await db.commit()
 
-async def deactivate_old_proxies():
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "UPDATE proxies SET is_active = 0 WHERE last_checked < datetime('now', '-1 day')"
-        )
-        await db.commit()
-
 # ========== توابع V2Ray ==========
 async def add_v2ray(link: str, remarks: str):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
-            "INSERT OR IGNORE INTO v2ray_configs (link, remarks) VALUES (?, ?)",
+            "INSERT OR IGNORE INTO v2ray (link, remarks) VALUES (?, ?)",
             (link, remarks)
         )
         await db.commit()
 
 async def get_all_v2ray():
     async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("SELECT link, remarks FROM v2ray_configs ORDER BY added_date DESC") as cursor:
+        async with db.execute("SELECT link, remarks FROM v2ray ORDER BY added_date DESC") as cursor:
             rows = await cursor.fetchall()
             return [{"link": row[0], "remarks": row[1]} for row in rows]
 
 async def delete_all_v2ray():
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("DELETE FROM v2ray_configs")
+        await db.execute("DELETE FROM v2ray")
         await db.commit()
 
 # ========== توابع WireGuard ==========
-async def add_wireguard(config_text: str, remarks: str):
+async def add_wireguard(config: str, remarks: str):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
-            "INSERT OR IGNORE INTO wireguard_configs (config_text, remarks) VALUES (?, ?)",
-            (config_text, remarks)
+            "INSERT OR IGNORE INTO wireguard (config, remarks) VALUES (?, ?)",
+            (config, remarks)
         )
         await db.commit()
 
 async def get_all_wireguard():
     async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("SELECT config_text, remarks FROM wireguard_configs ORDER BY added_date DESC") as cursor:
+        async with db.execute("SELECT config, remarks FROM wireguard ORDER BY added_date DESC") as cursor:
             rows = await cursor.fetchall()
             return [{"config": row[0], "remarks": row[1]} for row in rows]
 
 async def delete_all_wireguard():
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("DELETE FROM wireguard_configs")
+        await db.execute("DELETE FROM wireguard")
         await db.commit()
 
-# ========== توابع لاگ ==========
-async def log_usage(user_id: int, command: str):
+# ========== توابع تیکت ==========
+async def create_ticket(user_id: int, subject: str) -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "INSERT INTO tickets (user_id, subject) VALUES (?, ?) RETURNING id",
+            (user_id, subject)
+        )
+        row = await cursor.fetchone()
+        await db.commit()
+        return row[0] if row else None
+
+async def add_ticket_message(ticket_id: int, sender_id: int, message: str = None, file_id: str = None):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
-            "INSERT INTO usage_log (user_id, command) VALUES (?, ?)",
-            (user_id, command)
+            "INSERT INTO ticket_messages (ticket_id, sender_id, message, file_id) VALUES (?, ?, ?, ?)",
+            (ticket_id, sender_id, message, file_id)
+        )
+        await db.execute(
+            "UPDATE tickets SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (ticket_id,)
         )
         await db.commit()
 
-async def get_command_stats():
+async def get_user_tickets(user_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
-            "SELECT command, COUNT(*) FROM usage_log GROUP BY command ORDER BY COUNT(*) DESC"
+            "SELECT * FROM tickets WHERE user_id = ? ORDER BY created_at DESC",
+            (user_id,)
         ) as cursor:
             rows = await cursor.fetchall()
             return rows
 
-# ========== توابع سیستم دعوت دوستان ==========
+async def get_all_tickets():
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT * FROM tickets ORDER BY created_at DESC") as cursor:
+            rows = await cursor.fetchall()
+            return rows
+
+async def get_ticket_messages(ticket_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT * FROM ticket_messages WHERE ticket_id = ? ORDER BY created_at ASC",
+            (ticket_id,)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return rows
+
+async def update_ticket_status(ticket_id: int, status: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE tickets SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (status, ticket_id)
+        )
+        await db.commit()
+
+# ========== توابع رفرال ==========
 async def create_referral_code(user_id: int) -> str:
-    """ساخت کد دعوت برای کاربر"""
-    code = secrets.token_hex(4)  # کد ۸ رقمی (مثلاً a1b2c3d4)
+    code = secrets.token_hex(4)
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             "INSERT OR REPLACE INTO referrals (user_id, code) VALUES (?, ?)",
@@ -228,7 +302,6 @@ async def get_referral_code(user_id: int) -> str:
             return row[0] if row else None
 
 async def register_referral(referrer_id: int, new_user_id: int):
-    """ثبت دعوت جدید"""
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             "INSERT INTO referral_logs (referrer_id, new_user_id) VALUES (?, ?)",
@@ -246,7 +319,6 @@ async def get_referral_count(user_id: int) -> int:
             return row[0] if row else 0
 
 async def get_referral_details(user_id: int):
-    """دریافت جزئیات دعوت‌های کاربر"""
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
             "SELECT new_user_id, registered_at FROM referral_logs WHERE referrer_id = ? ORDER BY registered_at DESC",
@@ -254,3 +326,12 @@ async def get_referral_details(user_id: int):
         ) as cursor:
             rows = await cursor.fetchall()
             return rows
+
+# ========== توابع لاگ ==========
+async def log_usage(user_id: int, section: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO usage_logs (user_id, section) VALUES (?, ?)",
+            (user_id, section)
+        )
+        await db.commit()
