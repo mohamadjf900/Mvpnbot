@@ -1,20 +1,16 @@
 from aiogram import Router, F
-from aiogram.types import CallbackQuery, BufferedInputFile, InlineKeyboardButton
+from aiogram.types import CallbackQuery, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import database as db
-import logging
+from utils.helpers import back_button
 import qrcode
 from io import BytesIO
+from aiogram.types import BufferedInputFile
 
 router = Router()
 
 async def generate_qr_code(data: str) -> BufferedInputFile:
-    qr = qrcode.QRCode(
-        version=1,
-        error_correction=qrcode.constants.ERROR_CORRECT_L,
-        box_size=10,
-        border=4,
-    )
+    qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_L, box_size=8, border=4)
     qr.add_data(data)
     qr.make(fit=True)
     img = qr.make_image(fill_color="black", back_color="white")
@@ -31,16 +27,21 @@ async def v2ray_menu(callback: CallbackQuery):
     configs = await db.get_all_v2ray()
     if not configs:
         await callback.message.edit_text(
-            "📡 کانفیگ V2Ray رایگان در حال حاضر موجود نیست.",
+            "📡 کانفیگ V2Ray رایگان در حال حاضر موجود نیست.\n"
+            "لطفاً بعداً مراجعه کنید.",
             reply_markup=back_button()
         )
         await callback.answer()
         return
 
     await callback.message.delete()
+    
     for idx, c in enumerate(configs, 1):
         qr_file = await generate_qr_code(c['link'])
-        caption = f"🔸 {c['remarks']}\n\nبرای اتصال، این QR کد را اسکن کنید."
+        caption = f"🔸 **{c['remarks']}**\n\n"
+        caption += f"`{c['link'][:100]}...`\n\n"
+        caption += "📱 برای اتصال، QR کد را اسکن کنید یا لینک را کپی کنید."
+        
         if idx == len(configs):
             builder = InlineKeyboardBuilder()
             builder.add(InlineKeyboardButton(text="🔙 بازگشت به منو", callback_data="menu_main"))
@@ -51,4 +52,5 @@ async def v2ray_menu(callback: CallbackQuery):
             )
         else:
             await callback.message.answer_photo(photo=qr_file, caption=caption)
+    
     await callback.answer()
