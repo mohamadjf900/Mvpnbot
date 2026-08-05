@@ -104,6 +104,7 @@ async def init_db():
                 plan_id INTEGER,
                 plan_name TEXT,
                 price INTEGER,
+                user_count INTEGER DEFAULT 1,
                 receipt_file_id TEXT,
                 status TEXT DEFAULT 'pending',
                 panel_info TEXT,
@@ -139,6 +140,7 @@ async def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 volume_gb INTEGER NOT NULL,
                 price INTEGER NOT NULL,
+                user_count INTEGER DEFAULT 1,
                 active INTEGER DEFAULT 1
             )
         ''')
@@ -149,6 +151,7 @@ async def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 label TEXT NOT NULL,
                 price INTEGER NOT NULL,
+                user_count INTEGER DEFAULT 1,
                 active INTEGER DEFAULT 1
             )
         ''')
@@ -178,13 +181,13 @@ async def init_default_plans(db):
         from config import DEFAULT_NORMAL_PLANS, DEFAULT_VIP_PLANS
         for volume, price in DEFAULT_NORMAL_PLANS:
             await db.execute(
-                "INSERT INTO normal_plans (volume_gb, price) VALUES (?, ?)",
-                (volume, price)
+                "INSERT INTO normal_plans (volume_gb, price, user_count) VALUES (?, ?, ?)",
+                (volume, price, 1)
             )
         for label, price in DEFAULT_VIP_PLANS:
             await db.execute(
-                "INSERT INTO vip_plans (label, price) VALUES (?, ?)",
-                (label, price)
+                "INSERT INTO vip_plans (label, price, user_count) VALUES (?, ?, ?)",
+                (label, price, 1)
             )
         await db.commit()
 
@@ -456,16 +459,16 @@ async def get_referral_details(user_id: int):
 # ============================================================
 
 async def create_order(user_id: int, username: str, full_name: str, plan_id: int, 
-                       plan_name: str, price: int, coupon_code: str = None, 
-                       original_price: int = None) -> int:
+                       plan_name: str, price: int, user_count: int = 1,
+                       coupon_code: str = None, original_price: int = None) -> int:
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute('''
             INSERT INTO orders (
-                user_id, username, full_name, plan_id, plan_name, price,
+                user_id, username, full_name, plan_id, plan_name, price, user_count,
                 coupon_code, original_price, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING id
-        ''', (user_id, username, full_name, plan_id, plan_name, price,
+        ''', (user_id, username, full_name, plan_id, plan_name, price, user_count,
               coupon_code, original_price or price, datetime.now().isoformat()))
         row = await cursor.fetchone()
         await db.commit()
@@ -564,7 +567,7 @@ async def use_coupon(code: str) -> bool:
 async def get_normal_plans():
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
-            "SELECT id, volume_gb, price FROM normal_plans WHERE active = 1 ORDER BY volume_gb ASC"
+            "SELECT id, volume_gb, price, user_count FROM normal_plans WHERE active = 1 ORDER BY volume_gb ASC"
         )
         rows = await cursor.fetchall()
         return rows
@@ -572,7 +575,7 @@ async def get_normal_plans():
 async def get_normal_plan(plan_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
-            "SELECT id, volume_gb, price FROM normal_plans WHERE id = ? AND active = 1",
+            "SELECT id, volume_gb, price, user_count FROM normal_plans WHERE id = ? AND active = 1",
             (plan_id,)
         )
         row = await cursor.fetchone()
@@ -581,7 +584,7 @@ async def get_normal_plan(plan_id: int):
 async def get_vip_plans():
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
-            "SELECT id, label, price FROM vip_plans WHERE active = 1 ORDER BY price ASC"
+            "SELECT id, label, price, user_count FROM vip_plans WHERE active = 1 ORDER BY price ASC"
         )
         rows = await cursor.fetchall()
         return rows
@@ -589,11 +592,53 @@ async def get_vip_plans():
 async def get_vip_plan(plan_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
-            "SELECT id, label, price FROM vip_plans WHERE id = ? AND active = 1",
+            "SELECT id, label, price, user_count FROM vip_plans WHERE id = ? AND active = 1",
             (plan_id,)
         )
         row = await cursor.fetchone()
         return row
+
+async def update_normal_plan(plan_id: int, volume_gb: int, price: int, user_count: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE normal_plans SET volume_gb = ?, price = ?, user_count = ? WHERE id = ?",
+            (volume_gb, price, user_count, plan_id)
+        )
+        await db.commit()
+
+async def update_vip_plan(plan_id: int, label: str, price: int, user_count: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE vip_plans SET label = ?, price = ?, user_count = ? WHERE id = ?",
+            (label, price, user_count, plan_id)
+        )
+        await db.commit()
+
+async def add_normal_plan(volume_gb: int, price: int, user_count: int = 1):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO normal_plans (volume_gb, price, user_count) VALUES (?, ?, ?)",
+            (volume_gb, price, user_count)
+        )
+        await db.commit()
+
+async def add_vip_plan(label: str, price: int, user_count: int = 1):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO vip_plans (label, price, user_count) VALUES (?, ?, ?)",
+            (label, price, user_count)
+        )
+        await db.commit()
+
+async def delete_normal_plan(plan_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM normal_plans WHERE id = ?", (plan_id,))
+        await db.commit()
+
+async def delete_vip_plan(plan_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM vip_plans WHERE id = ?", (plan_id,))
+        await db.commit()
 
 # ============================================================
 # ====================== توابع لاگ ======================
