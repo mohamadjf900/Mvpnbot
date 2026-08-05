@@ -3,7 +3,7 @@ import logging
 from aiogram import Bot, Dispatcher
 from aiogram.types import BotCommand
 from config import BOT_TOKEN
-from handlers import start, proxy, v2ray, wireguard, dns, buy, support, admin, referral  # referral اضافه شد
+from handlers import start, proxy, v2ray, wireguard, dns, buy, support, admin, ticket, referral
 from middlewares import CheckSubscriptionMiddleware
 from database import init_db
 from utils.proxy_updater import update_proxies_periodically
@@ -16,9 +16,6 @@ async def set_commands(bot: Bot):
         BotCommand(command="invite", description="دعوت دوستان"),
         BotCommand(command="stats", description="آمار (فقط ادمین)"),
         BotCommand(command="broadcast", description="ارسال همگانی (ادمین)"),
-        BotCommand(command="add_proxy", description="افزودن پروکسی (ادمین)"),
-        BotCommand(command="add_v2ray", description="افزودن V2Ray (ادمین)"),
-        BotCommand(command="add_wireguard", description="افزودن WireGuard (ادمین)"),
     ]
     await bot.set_my_commands(commands)
 
@@ -38,12 +35,11 @@ async def main():
     dp.include_router(buy.router)
     dp.include_router(support.router)
     dp.include_router(admin.router)
-    dp.include_router(referral.router)  # روت جدید
+    dp.include_router(ticket.router)
+    dp.include_router(referral.router)
 
     await set_commands(bot)
-
     asyncio.create_task(update_proxies_periodically())
-
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
