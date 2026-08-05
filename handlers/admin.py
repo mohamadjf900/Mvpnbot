@@ -13,7 +13,10 @@ DB_PATH = "bot_database.db"
 def is_admin(user_id):
     return user_id in config.ADMIN_IDS
 
-# ========== آمار ==========
+# ============================================================
+# ====================== آمار ======================
+# ============================================================
+
 @router.message(Command("stats"))
 async def stats_command(message: Message):
     if not is_admin(message.from_user.id):
@@ -24,7 +27,10 @@ async def stats_command(message: Message):
     text = f"📊 **آمار ربات:**\n\n👥 کل کاربران: {total}\n📈 کاربران فعال امروز: {active_today}\n📈 کاربران فعال هفته: {active_week}"
     await message.answer(text)
 
-# ========== ارسال همگانی ==========
+# ============================================================
+# ====================== ارسال همگانی ======================
+# ============================================================
+
 @router.message(Command("broadcast"))
 async def broadcast_command(message: Message):
     if not is_admin(message.from_user.id):
@@ -44,7 +50,10 @@ async def broadcast_command(message: Message):
             fail += 1
     await message.answer(f"✅ ارسال شد: {success}\n❌ ناموفق: {fail}")
 
-# ========== بکاپ و بازیابی ==========
+# ============================================================
+# ====================== بکاپ ======================
+# ============================================================
+
 @router.message(Command("backup"))
 async def backup_db(message: Message):
     if not is_admin(message.from_user.id):
@@ -74,7 +83,10 @@ async def restore_db(message: Message):
     except Exception as e:
         await message.answer(f"❌ خطا در بازیابی: {e}")
 
-# ========== اضافه کردن پروکسی ==========
+# ============================================================
+# ====================== مدیریت پروکسی ======================
+# ============================================================
+
 @router.message(Command("add_proxy"))
 async def add_proxy_command(message: Message):
     if not is_admin(message.from_user.id):
@@ -83,7 +95,6 @@ async def add_proxy_command(message: Message):
     if not text:
         await message.answer("❌ فرمت: /add_proxy HTTP 1.2.3.4 8080 یا /add_proxy https://t.me/proxy?server=...&port=... توضیحات")
         return
-    
     if text.startswith("https://t.me/proxy?"):
         parts = text.split(maxsplit=1)
         url = parts[0].strip()
@@ -94,7 +105,6 @@ async def add_proxy_command(message: Message):
         except Exception as e:
             await message.answer(f"❌ خطا: {e}")
         return
-    
     args = text.split()
     if len(args) != 3:
         await message.answer("❌ فرمت: /add_proxy <type> <ip> <port>")
@@ -113,7 +123,17 @@ async def add_proxy_command(message: Message):
     except Exception as e:
         await message.answer(f"❌ خطا: {e}")
 
-# ========== اضافه کردن V2Ray ==========
+@router.message(Command("clear_proxies"))
+async def clear_proxies(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    await db.delete_all_proxies()
+    await message.answer("✅ تمام پروکسی‌ها حذف شدند.")
+
+# ============================================================
+# ====================== مدیریت V2Ray ======================
+# ============================================================
+
 def extract_remarks_from_link(link: str) -> str:
     if '#' in link:
         return link.split('#', 1)[1].strip()
@@ -140,7 +160,17 @@ async def add_v2ray_command(message: Message):
     except Exception as e:
         await message.answer(f"❌ خطا: {e}")
 
-# ========== اضافه کردن WireGuard ==========
+@router.message(Command("clear_v2ray"))
+async def clear_v2ray(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    await db.delete_all_v2ray()
+    await message.answer("✅ تمام کانفیگ‌های V2Ray حذف شدند.")
+
+# ============================================================
+# ====================== مدیریت WireGuard ======================
+# ============================================================
+
 @router.message(Command("add_wireguard"))
 async def add_wireguard_command(message: Message):
     if not is_admin(message.from_user.id):
@@ -156,7 +186,17 @@ async def add_wireguard_command(message: Message):
     except Exception as e:
         await message.answer(f"❌ خطا: {e}")
 
-# ========== سفارشات ==========
+@router.message(Command("clear_wireguard"))
+async def clear_wireguard(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    await db.delete_all_wireguard()
+    await message.answer("✅ تمام کانفیگ‌های WireGuard حذف شدند.")
+
+# ============================================================
+# ====================== مدیریت سفارشات ======================
+# ============================================================
+
 @router.message(Command("orders"))
 async def list_orders(message: Message):
     if not is_admin(message.from_user.id):
@@ -167,7 +207,7 @@ async def list_orders(message: Message):
         return
     text = "📋 **سفارش‌های در انتظار تأیید:**\n\n"
     for o in orders[:20]:
-        text += f"🆔 #{o[0]} | 👤 {o[3]} | 📦 {o[5]} | 💰 {o[4]:,} تومان\n"
+        text += f"🆔 #{o[0]} | 👤 {o[3]} | 📦 {o[5]} | 👥 {o[8]} نفر | 💰 {o[4]:,} تومان\n"
     await message.answer(text[:4000])
 
 @router.message(Command("confirm_"))
@@ -183,7 +223,7 @@ async def confirm_order(message: Message):
             row = await cursor.fetchone()
             if row:
                 try:
-                    await message.bot.send_message(row[0], f"✅ سفارش شما #{order_id} تأیید شد!")
+                    await message.bot.send_message(row[0], f"✅ سفارش شما #{order_id} تأیید شد!\nبه زودی اطلاعات پنل ارسال می‌شود.")
                 except:
                     pass
     except:
@@ -202,7 +242,7 @@ async def reject_order(message: Message):
             row = await cursor.fetchone()
             if row:
                 try:
-                    await message.bot.send_message(row[0], f"❌ سفارش شما #{order_id} رد شد.")
+                    await message.bot.send_message(row[0], f"❌ سفارش شما #{order_id} رد شد.\nبرای اطلاعات بیشتر با پشتیبانی تماس بگیرید.")
                 except:
                     pass
     except:
@@ -232,24 +272,151 @@ async def deliver_order(message: Message):
     except:
         await message.answer("❌ خطا در تحویل سفارش.")
 
-# ========== پاک کردن ==========
-@router.message(Command("clear_proxies"))
-async def clear_proxies(message: Message):
-    if not is_admin(message.from_user.id):
-        return
-    await db.delete_all_proxies()
-    await message.answer("✅ تمام پروکسی‌ها حذف شدند.")
+# ============================================================
+# ====================== مدیریت پلن‌ها (ادمین) ======================
+# ============================================================
 
-@router.message(Command("clear_v2ray"))
-async def clear_v2ray(message: Message):
+@router.message(Command("show_plans"))
+async def show_plans(message: Message):
     if not is_admin(message.from_user.id):
         return
-    await db.delete_all_v2ray()
-    await message.answer("✅ تمام کانفیگ‌های V2Ray حذف شدند.")
+    
+    normal = await db.get_normal_plans()
+    vip = await db.get_vip_plans()
+    
+    text = "📋 **لیست پلن‌های فعلی:**\n\n"
+    
+    text += "📦 **پلن‌های عادی:**\n"
+    for plan in normal:
+        plan_id, volume, price, users = plan
+        text += f"  🆔 {plan_id} | {volume} گیگ | {price:,} تومان | 👤 {users} کاربر\n"
+    
+    text += "\n⭐ **پلن‌های ویژه:**\n"
+    for plan in vip:
+        plan_id, label, price, users = plan
+        text += f"  🆔 {plan_id} | {label} | {price:,} تومان | 👤 {users} کاربر\n"
+    
+    text += "\n📌 **دستورات مدیریت:**\n"
+    text += "/add_normal <حجم> <قیمت> <تعداد کاربر> - اضافه کردن پلن عادی\n"
+    text += "/add_vip <برچسب> <قیمت> <تعداد کاربر> - اضافه کردن پلن ویژه\n"
+    text += "/edit_normal <id> <حجم> <قیمت> <تعداد کاربر> - ویرایش پلن عادی\n"
+    text += "/edit_vip <id> <برچسب> <قیمت> <تعداد کاربر> - ویرایش پلن ویژه\n"
+    text += "/delete_plan <id> - حذف پلن"
+    
+    await message.answer(text)
 
-@router.message(Command("clear_wireguard"))
-async def clear_wireguard(message: Message):
+# ========== اضافه کردن پلن عادی ==========
+@router.message(Command("add_normal"))
+async def add_normal_plan(message: Message):
     if not is_admin(message.from_user.id):
         return
-    await db.delete_all_wireguard()
-    await message.answer("✅ تمام کانفیگ‌های WireGuard حذف شدند.")
+    
+    parts = message.text.split()
+    if len(parts) != 4:
+        await message.answer("❌ فرمت: /add_normal <حجم> <قیمت> <تعداد کاربر>\nمثال: /add_normal 10 60000 1")
+        return
+    
+    try:
+        volume = int(parts[1])
+        price = int(parts[2])
+        user_count = int(parts[3])
+        
+        await db.add_normal_plan(volume, price, user_count)
+        await message.answer(f"✅ پلن عادی جدید اضافه شد!\n📦 {volume} گیگ | {price:,} تومان | 👤 {user_count} کاربر")
+    except Exception as e:
+        await message.answer(f"❌ خطا: {e}")
+
+# ========== اضافه کردن پلن ویژه ==========
+@router.message(Command("add_vip"))
+async def add_vip_plan(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    
+    parts = message.text.split(maxsplit=3)
+    if len(parts) != 4:
+        await message.answer("❌ فرمت: /add_vip <برچسب> <قیمت> <تعداد کاربر>\nمثال: /add_vip VIP-پرمیوم 300000 2")
+        return
+    
+    try:
+        label = parts[1]
+        price = int(parts[2])
+        user_count = int(parts[3])
+        
+        await db.add_vip_plan(label, price, user_count)
+        await message.answer(f"✅ پلن ویژه جدید اضافه شد!\n⭐ {label} | {price:,} تومان | 👤 {user_count} کاربر")
+    except Exception as e:
+        await message.answer(f"❌ خطا: {e}")
+
+# ========== ویرایش پلن عادی ==========
+@router.message(Command("edit_normal"))
+async def edit_normal_plan(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    
+    parts = message.text.split()
+    if len(parts) != 5:
+        await message.answer("❌ فرمت: /edit_normal <id> <حجم> <قیمت> <تعداد کاربر>\nمثال: /edit_normal 1 20 120000 2")
+        return
+    
+    try:
+        plan_id = int(parts[1])
+        volume = int(parts[2])
+        price = int(parts[3])
+        user_count = int(parts[4])
+        
+        await db.update_normal_plan(plan_id, volume, price, user_count)
+        await message.answer(f"✅ پلن عادی {plan_id} با موفقیت ویرایش شد!\n📦 {volume} گیگ | {price:,} تومان | 👤 {user_count} کاربر")
+    except Exception as e:
+        await message.answer(f"❌ خطا: {e}")
+
+# ========== ویرایش پلن ویژه ==========
+@router.message(Command("edit_vip"))
+async def edit_vip_plan(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    
+    parts = message.text.split(maxsplit=4)
+    if len(parts) != 5:
+        await message.answer("❌ فرمت: /edit_vip <id> <برچسب> <قیمت> <تعداد کاربر>\nمثال: /edit_vip 1 VIP-ماهانه 250000 1")
+        return
+    
+    try:
+        plan_id = int(parts[1])
+        label = parts[2]
+        price = int(parts[3])
+        user_count = int(parts[4])
+        
+        await db.update_vip_plan(plan_id, label, price, user_count)
+        await message.answer(f"✅ پلن ویژه {plan_id} با موفقیت ویرایش شد!\n⭐ {label} | {price:,} تومان | 👤 {user_count} کاربر")
+    except Exception as e:
+        await message.answer(f"❌ خطا: {e}")
+
+# ========== حذف پلن ==========
+@router.message(Command("delete_plan"))
+async def delete_plan(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    
+    parts = message.text.split()
+    if len(parts) != 2:
+        await message.answer("❌ فرمت: /delete_plan <id>\nمثال: /delete_plan 3")
+        return
+    
+    try:
+        plan_id = int(parts[1])
+        
+        normal = await db.get_normal_plans()
+        vip = await db.get_vip_plans()
+        normal_ids = [p[0] for p in normal]
+        vip_ids = [p[0] for p in vip]
+        
+        if plan_id in normal_ids:
+            await db.delete_normal_plan(plan_id)
+            await message.answer(f"✅ پلن عادی {plan_id} حذف شد.")
+        elif plan_id in vip_ids:
+            await db.delete_vip_plan(plan_id)
+            await message.answer(f"✅ پلن ویژه {plan_id} حذف شد.")
+        else:
+            await message.answer(f"❌ پلن {plan_id} یافت نشد!")
+    except Exception as e:
+        await message.answer(f"❌ خطا: {e}")
