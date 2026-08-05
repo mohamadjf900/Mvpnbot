@@ -5,7 +5,9 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 import database as db
 import config
+import logging
 
+logger = logging.getLogger(__name__)
 router = Router()
 
 # ========== State برای خرید ==========
@@ -22,55 +24,63 @@ def services_kb():
     ]
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
-# ========== دکمه عادی ==========
+# ========== دکمه عادی (نمایش پلن‌ها با دکمه‌های Inline) ==========
 @router.message(F.text == "📦 عادی")
 async def normal_plans(message: Message):
-    plans = await db.get_normal_plans()
-    if not plans:
-        await message.answer("❌ در حال حاضر هیچ پلن عادی موجود نیست.", reply_markup=services_kb())
-        return
-    
-    text = "📦 **پلن‌های عادی:**\n\n"
-    buttons = []
-    for plan in plans:
-        plan_id, volume_gb, price = plan
-        text += f"📦 {volume_gb} گیگ → {price:,} تومان\n"
-        buttons.append([InlineKeyboardButton(
-            text=f"خرید {volume_gb} گیگ",
-            callback_data=f"buy_normal_{plan_id}"
-        )])
-    
-    buttons.append([InlineKeyboardButton(text="🔙 بازگشت", callback_data="back_to_services")])
-    
-    await message.answer(
-        text,
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
-    )
+    try:
+        plans = await db.get_normal_plans()
+        if not plans:
+            await message.answer("❌ در حال حاضر هیچ پلن عادی موجود نیست.", reply_markup=services_kb())
+            return
+        
+        text = "📦 **پلن‌های عادی:**\n\n"
+        buttons = []
+        for plan in plans:
+            plan_id, volume_gb, price, user_count = plan
+            text += f"📦 {volume_gb} گیگ | {price:,} تومان | 👤 {user_count} کاربر\n"
+            buttons.append([InlineKeyboardButton(
+                text=f"خرید {volume_gb} گیگ",
+                callback_data=f"buy_normal_{plan_id}"
+            )])
+        
+        buttons.append([InlineKeyboardButton(text="🔙 بازگشت", callback_data="back_to_services")])
+        
+        await message.answer(
+            text,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+        )
+    except Exception as e:
+        logger.error(f"Error in normal_plans: {e}")
+        await message.answer(f"❌ خطا در دریافت پلن‌ها: {e}", reply_markup=services_kb())
 
-# ========== دکمه ویژه ==========
+# ========== دکمه ویژه (نمایش پلن‌ها با دکمه‌های Inline) ==========
 @router.message(F.text == "⭐ ویژه")
 async def vip_plans(message: Message):
-    plans = await db.get_vip_plans()
-    if not plans:
-        await message.answer("❌ در حال حاضر هیچ پلن ویژه‌ای موجود نیست.", reply_markup=services_kb())
-        return
-    
-    text = "⭐ **پلن‌های ویژه:**\n\n"
-    buttons = []
-    for plan in plans:
-        plan_id, label, price = plan
-        text += f"⭐ {label} → {price:,} تومان\n"
-        buttons.append([InlineKeyboardButton(
-            text=f"خرید {label}",
-            callback_data=f"buy_vip_{plan_id}"
-        )])
-    
-    buttons.append([InlineKeyboardButton(text="🔙 بازگشت", callback_data="back_to_services")])
-    
-    await message.answer(
-        text,
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
-    )
+    try:
+        plans = await db.get_vip_plans()
+        if not plans:
+            await message.answer("❌ در حال حاضر هیچ پلن ویژه‌ای موجود نیست.", reply_markup=services_kb())
+            return
+        
+        text = "⭐ **پلن‌های ویژه:**\n\n"
+        buttons = []
+        for plan in plans:
+            plan_id, label, price, user_count = plan
+            text += f"⭐ {label} | {price:,} تومان | 👤 {user_count} کاربر\n"
+            buttons.append([InlineKeyboardButton(
+                text=f"خرید {label}",
+                callback_data=f"buy_vip_{plan_id}"
+            )])
+        
+        buttons.append([InlineKeyboardButton(text="🔙 بازگشت", callback_data="back_to_services")])
+        
+        await message.answer(
+            text,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+        )
+    except Exception as e:
+        logger.error(f"Error in vip_plans: {e}")
+        await message.answer(f"❌ خطا در دریافت پلن‌ها: {e}", reply_markup=services_kb())
 
 # ========== بازگشت از لیست پلن‌ها به منوی خرید ==========
 @router.callback_query(F.data == "back_to_services")
@@ -91,29 +101,32 @@ async def back_to_main(message: Message):
     from handlers.start import main_menu_keyboard
     await message.answer("منوی اصلی:", reply_markup=main_menu_keyboard(message.from_user.id))
 
-# ========== خرید عادی ==========
+# ========== خرید عادی (Callback) ==========
 @router.callback_query(F.data.startswith("buy_normal_"))
 async def buy_normal_callback(callback: CallbackQuery, state: FSMContext):
-    plan_id = int(callback.data.split("_")[2])
-    plan = await db.get_normal_plan(plan_id)
-    if not plan:
-        await callback.answer("❌ پلن یافت نشد!", show_alert=True)
-        return
-    
-    plan_name = f"{plan[1]} گیگ (عادی)"
-    price = plan[2]
-    
-    await state.update_data(
-        plan_id=plan_id,
-        plan_name=plan_name,
-        price=price,
-        service_type="normal"
-    )
-    
-    text = f"""
+    try:
+        plan_id = int(callback.data.split("_")[2])
+        plan = await db.get_normal_plan(plan_id)
+        if not plan:
+            await callback.answer("❌ پلن یافت نشد!", show_alert=True)
+            return
+        
+        plan_id, volume_gb, price, user_count = plan
+        plan_name = f"{volume_gb} گیگ (عادی)"
+        
+        await state.update_data(
+            plan_id=plan_id,
+            plan_name=plan_name,
+            price=price,
+            service_type="normal",
+            user_count=user_count
+        )
+        
+        text = f"""
 📋 **سفارش شما:**
 
 📦 سرویس: {plan_name}
+👤 تعداد کاربران: {user_count} نفر
 💰 قیمت: {price:,} تومان
 
 💳 **روش پرداخت:**
@@ -123,34 +136,40 @@ async def buy_normal_callback(callback: CallbackQuery, state: FSMContext):
 
 📸 بعد از واریز، رسید را (عکس) در همینجا ارسال کنید.
 """
-    await callback.message.edit_text(text)
-    await callback.message.answer("📸 لطفاً رسید را ارسال کنید:", reply_markup=services_kb())
-    await state.set_state(BuyStates.waiting_for_receipt)
-    await callback.answer()
+        await callback.message.edit_text(text)
+        await callback.message.answer("📸 لطفاً رسید را ارسال کنید:", reply_markup=services_kb())
+        await state.set_state(BuyStates.waiting_for_receipt)
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"Error in buy_normal_callback: {e}")
+        await callback.answer(f"❌ خطا: {e}", show_alert=True)
 
-# ========== خرید ویژه ==========
+# ========== خرید ویژه (Callback) ==========
 @router.callback_query(F.data.startswith("buy_vip_"))
 async def buy_vip_callback(callback: CallbackQuery, state: FSMContext):
-    plan_id = int(callback.data.split("_")[2])
-    plan = await db.get_vip_plan(plan_id)
-    if not plan:
-        await callback.answer("❌ پلن یافت نشد!", show_alert=True)
-        return
-    
-    plan_name = f"{plan[1]} (ویژه)"
-    price = plan[2]
-    
-    await state.update_data(
-        plan_id=plan_id,
-        plan_name=plan_name,
-        price=price,
-        service_type="vip"
-    )
-    
-    text = f"""
+    try:
+        plan_id = int(callback.data.split("_")[2])
+        plan = await db.get_vip_plan(plan_id)
+        if not plan:
+            await callback.answer("❌ پلن یافت نشد!", show_alert=True)
+            return
+        
+        plan_id, label, price, user_count = plan
+        plan_name = f"{label} (ویژه)"
+        
+        await state.update_data(
+            plan_id=plan_id,
+            plan_name=plan_name,
+            price=price,
+            service_type="vip",
+            user_count=user_count
+        )
+        
+        text = f"""
 📋 **سفارش شما:**
 
 ⭐ سرویس ویژه: {plan_name}
+👤 تعداد کاربران: {user_count} نفر
 💰 قیمت: {price:,} تومان
 
 💳 **روش پرداخت:**
@@ -160,59 +179,68 @@ async def buy_vip_callback(callback: CallbackQuery, state: FSMContext):
 
 📸 بعد از واریز، رسید را (عکس) در همینجا ارسال کنید.
 """
-    await callback.message.edit_text(text)
-    await callback.message.answer("📸 لطفاً رسید را ارسال کنید:", reply_markup=services_kb())
-    await state.set_state(BuyStates.waiting_for_receipt)
-    await callback.answer()
+        await callback.message.edit_text(text)
+        await callback.message.answer("📸 لطفاً رسید را ارسال کنید:", reply_markup=services_kb())
+        await state.set_state(BuyStates.waiting_for_receipt)
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"Error in buy_vip_callback: {e}")
+        await callback.answer(f"❌ خطا: {e}", show_alert=True)
 
 # ========== دریافت رسید ==========
 @router.message(BuyStates.waiting_for_receipt, F.photo)
 async def receive_receipt(message: Message, state: FSMContext):
-    data = await state.get_data()
-    if not data:
-        await message.answer("❌ هیچ سفارشی در حال پردازش نیست!", reply_markup=services_kb())
+    try:
+        data = await state.get_data()
+        if not data:
+            await message.answer("❌ هیچ سفارشی در حال پردازش نیست!", reply_markup=services_kb())
+            await state.clear()
+            return
+        
+        file_id = message.photo[-1].file_id
+        
+        order_id = await db.create_order(
+            user_id=message.from_user.id,
+            username=message.from_user.username,
+            full_name=message.from_user.full_name,
+            plan_id=data.get('plan_id'),
+            plan_name=data.get('plan_name'),
+            price=data.get('price'),
+            user_count=data.get('user_count', 1)
+        )
+        
+        await db.update_order_receipt(order_id, file_id)
         await state.clear()
-        return
-    
-    file_id = message.photo[-1].file_id
-    
-    order_id = await db.create_order(
-        user_id=message.from_user.id,
-        username=message.from_user.username,
-        full_name=message.from_user.full_name,
-        plan_id=data.get('plan_id'),
-        plan_name=data.get('plan_name'),
-        price=data.get('price')
-    )
-    
-    await db.update_order_receipt(order_id, file_id)
-    await state.clear()
-    
-    for admin_id in config.ADMIN_IDS:
-        try:
-            await message.bot.send_photo(
-                admin_id,
-                photo=file_id,
-                caption=f"""
+        
+        for admin_id in config.ADMIN_IDS:
+            try:
+                await message.bot.send_photo(
+                    admin_id,
+                    photo=file_id,
+                    caption=f"""
 🆕 **سفارش جدید!**
 
 🆔 شماره سفارش: #{order_id}
 👤 کاربر: {message.from_user.full_name} (@{message.from_user.username})
 📦 سرویس: {data.get('plan_name')}
+👥 تعداد کاربران: {data.get('user_count', 1)} نفر
 💰 قیمت: {data.get('price'):,} تومان
 
 ✅ تأیید: /confirm_{order_id}
 ❌ رد: /reject_{order_id}
 📡 تحویل: /deliver_{order_id} اطلاعات پنل
 """
-            )
-        except:
-            pass
-    
-    await message.answer(
-        "✅ رسید شما دریافت شد!\nسفارش شما برای تأیید به ادمین ارسال شد.",
-        reply_markup=services_kb()
-    )
+                )
+            except:
+                pass
+        
+        await message.answer(
+            "✅ رسید شما دریافت شد!\nسفارش شما برای تأیید به ادمین ارسال شد.",
+            reply_markup=services_kb()
+        )
+    except Exception as e:
+        logger.error(f"Error in receive_receipt: {e}")
+        await message.answer(f"❌ خطا: {e}", reply_markup=services_kb())
 
 @router.message(BuyStates.waiting_for_receipt)
 async def invalid_receipt(message: Message):
@@ -229,40 +257,44 @@ async def enter_coupon(message: Message, state: FSMContext):
 
 @router.message(BuyStates.entering_coupon_code)
 async def apply_coupon(message: Message, state: FSMContext):
-    code = message.text.strip().upper()
-    coupon = await db.get_coupon(code)
-    
-    if not coupon:
-        await message.answer("❌ کد تخفیف نامعتبر است!", reply_markup=services_kb())
-        await state.clear()
-        return
-    
-    if not coupon[4] or (coupon[2] and coupon[3] >= coupon[2]):
-        await message.answer("❌ این کد تخفیف منقضی شده است!", reply_markup=services_kb())
-        await state.clear()
-        return
-    
-    data = await state.get_data()
-    if not data or 'price' not in data:
-        await message.answer("❌ هیچ سفارشی در حال پردازش نیست!", reply_markup=services_kb())
-        await state.clear()
-        return
-    
-    original_price = data.get('price', 0)
-    discount = int(original_price * coupon[1] / 100)
-    new_price = original_price - discount
-    
-    await state.update_data(
-        coupon_code=code,
-        original_price=original_price,
-        price=new_price
-    )
-    
-    await message.answer(
-        f"✅ کد تخفیف {coupon[1]}% اعمال شد!\n"
-        f"💰 قیمت قبلی: {original_price:,} تومان\n"
-        f"💰 قیمت جدید: {new_price:,} تومان\n\n"
-        f"📸 لطفاً رسید پرداخت را ارسال کنید.",
-        reply_markup=services_kb()
-    )
-    await state.set_state(BuyStates.waiting_for_receipt)
+    try:
+        code = message.text.strip().upper()
+        coupon = await db.get_coupon(code)
+        
+        if not coupon:
+            await message.answer("❌ کد تخفیف نامعتبر است!", reply_markup=services_kb())
+            await state.clear()
+            return
+        
+        if not coupon[4] or (coupon[2] and coupon[3] >= coupon[2]):
+            await message.answer("❌ این کد تخفیف منقضی شده است!", reply_markup=services_kb())
+            await state.clear()
+            return
+        
+        data = await state.get_data()
+        if not data or 'price' not in data:
+            await message.answer("❌ هیچ سفارشی در حال پردازش نیست!", reply_markup=services_kb())
+            await state.clear()
+            return
+        
+        original_price = data.get('price', 0)
+        discount = int(original_price * coupon[1] / 100)
+        new_price = original_price - discount
+        
+        await state.update_data(
+            coupon_code=code,
+            original_price=original_price,
+            price=new_price
+        )
+        
+        await message.answer(
+            f"✅ کد تخفیف {coupon[1]}% اعمال شد!\n"
+            f"💰 قیمت قبلی: {original_price:,} تومان\n"
+            f"💰 قیمت جدید: {new_price:,} تومان\n\n"
+            f"📸 لطفاً رسید پرداخت را ارسال کنید.",
+            reply_markup=services_kb()
+        )
+        await state.set_state(BuyStates.waiting_for_receipt)
+    except Exception as e:
+        logger.error(f"Error in apply_coupon: {e}")
+        await message.answer(f"❌ خطا: {e}", reply_markup=services_kb())
