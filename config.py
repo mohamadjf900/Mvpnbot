@@ -11,7 +11,7 @@ CHANNEL_LINK = os.getenv("CHANNEL_LINK", "https://t.me/mvpni7")
 
 # ========== اطلاعات برند و پشتیبانی ==========
 BRAND_NAME = os.getenv("BRAND_NAME", "Mvpn")
-SUPPORT_USERNAME = os.getenv("SUPPORT_USERNAME", "YourSupportUsername")  # بدون @
+SUPPORT_USERNAME = os.getenv("SUPPORT_USERNAME", "Mj054")  # بدون @
 
 # ========== تنظیمات دیتابیس ==========
 DB_PATH = os.getenv("DB_PATH", "bot.db")
