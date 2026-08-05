@@ -1,10 +1,9 @@
 import asyncio
 import logging
-import os
 from aiogram import Bot, Dispatcher
 from aiogram.types import BotCommand
 from config import BOT_TOKEN
-from handlers import start, proxy, v2ray, wireguard, dns, buy, support, admin, ticket
+from handlers import start, proxy, v2ray, wireguard, dns, buy, support, admin, referral  # referral اضافه شد
 from middlewares import CheckSubscriptionMiddleware
 from database import init_db
 from utils.proxy_updater import update_proxies_periodically
@@ -14,27 +13,23 @@ logging.basicConfig(level=logging.INFO)
 async def set_commands(bot: Bot):
     commands = [
         BotCommand(command="start", description="شروع مجدد"),
+        BotCommand(command="invite", description="دعوت دوستان"),
         BotCommand(command="stats", description="آمار (فقط ادمین)"),
         BotCommand(command="broadcast", description="ارسال همگانی (ادمین)"),
-        BotCommand(command="ticket", description="سیستم پشتیبانی"),
-        BotCommand(command="mytickets", description="تیکت‌های من"),
+        BotCommand(command="add_proxy", description="افزودن پروکسی (ادمین)"),
+        BotCommand(command="add_v2ray", description="افزودن V2Ray (ادمین)"),
+        BotCommand(command="add_wireguard", description="افزودن WireGuard (ادمین)"),
     ]
     await bot.set_my_commands(commands)
 
 async def main():
-    # ۱. راه‌اندازی دیتابیس ربات
     await init_db()
-    
-    # ۲. خواندن توکن (اولویت با Environment رندر، سپس فایل کانفیگ)
-    token = os.getenv("BOT_TOKEN", BOT_TOKEN)
-    bot = Bot(token=token)
+    bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher()
 
-    # ۳. فعال‌سازی میدلورهای اجباری جوین کانال
     dp.message.middleware(CheckSubscriptionMiddleware())
     dp.callback_query.middleware(CheckSubscriptionMiddleware())
 
-    # ۴. ثبت تمامی روترها به صورت کامل (تیکت و پشتیبانی کاملاً فعال است)
     dp.include_router(start.router)
     dp.include_router(proxy.router)
     dp.include_router(v2ray.router)
@@ -43,14 +38,12 @@ async def main():
     dp.include_router(buy.router)
     dp.include_router(support.router)
     dp.include_router(admin.router)
-    dp.include_router(ticket.router)
+    dp.include_router(referral.router)  # روت جدید
 
     await set_commands(bot)
 
-    # ۵. اجرای تسک پس‌زمینه برای آپدیت دوره‌ای پروکسی‌ها
     asyncio.create_task(update_proxies_periodically())
 
-    print("--- Aiogram Bot with Ticket System is Polling Successfully! ---")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
