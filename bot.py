@@ -1,9 +1,8 @@
 import asyncio
 import logging
-from aiogram import Bot, Dispatcher, F, BaseMiddleware
-from aiogram.filters import Command
+from aiogram import Bot, Dispatcher, BaseMiddleware
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, BotCommand
 from time import monotonic
 import config
 import database as db
@@ -34,7 +33,6 @@ class ThrottlingMiddleware(BaseMiddleware):
 bot = Bot(token=config.BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
-# اضافه کردن Middleware آنتی‌اسپم
 dp.message.outer_middleware(ThrottlingMiddleware(rate_limit=0.7))
 dp.callback_query.outer_middleware(ThrottlingMiddleware(rate_limit=0.4))
 
@@ -49,15 +47,20 @@ dp.include_router(support.router)
 dp.include_router(admin.router)
 dp.include_router(ticket.router)
 dp.include_router(referral.router)
-dp.include_router(shop.router)  # سیستم فروشگاهی
+dp.include_router(shop.router)
+
+# ========== تنظیم دستورات با فرمت صحیح ==========
+async def set_commands():
+    commands = [
+        BotCommand(command="start", description="شروع مجدد"),
+        BotCommand(command="coupon", description="استفاده از کد تخفیف"),
+    ]
+    await bot.set_my_commands(commands)
 
 # ========== اجرا ==========
 async def main():
     await db.init_db()
-    await bot.set_my_commands([
-        ("start", "شروع مجدد"),
-        ("coupon", "استفاده از کد تخفیف"),
-    ])
+    await set_commands()
     logger.info("✅ Bot started!")
     await dp.start_polling(bot)
 
