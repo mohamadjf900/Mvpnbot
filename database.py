@@ -133,9 +133,9 @@ async def init_db():
             )
         ''')
         
-        # ====== جدول پلن‌ها ======
+        # ====== جدول پلن‌های عادی ======
         await db.execute('''
-            CREATE TABLE IF NOT EXISTS gaming_plans (
+            CREATE TABLE IF NOT EXISTS normal_plans (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 volume_gb INTEGER NOT NULL,
                 price INTEGER NOT NULL,
@@ -143,8 +143,9 @@ async def init_db():
             )
         ''')
         
+        # ====== جدول پلن‌های ویژه ======
         await db.execute('''
-            CREATE TABLE IF NOT EXISTS multi_plans (
+            CREATE TABLE IF NOT EXISTS vip_plans (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 label TEXT NOT NULL,
                 price INTEGER NOT NULL,
@@ -171,18 +172,18 @@ async def init_db():
         await init_default_coupon(db)
 
 async def init_default_plans(db):
-    cursor = await db.execute("SELECT COUNT(*) FROM gaming_plans")
+    cursor = await db.execute("SELECT COUNT(*) FROM normal_plans")
     row = await cursor.fetchone()
     if row[0] == 0:
-        from config import DEFAULT_GAMING_PLANS, DEFAULT_MULTI_PLANS
-        for volume, price in DEFAULT_GAMING_PLANS:
+        from config import DEFAULT_NORMAL_PLANS, DEFAULT_VIP_PLANS
+        for volume, price in DEFAULT_NORMAL_PLANS:
             await db.execute(
-                "INSERT INTO gaming_plans (volume_gb, price) VALUES (?, ?)",
+                "INSERT INTO normal_plans (volume_gb, price) VALUES (?, ?)",
                 (volume, price)
             )
-        for label, price in DEFAULT_MULTI_PLANS:
+        for label, price in DEFAULT_VIP_PLANS:
             await db.execute(
-                "INSERT INTO multi_plans (label, price) VALUES (?, ?)",
+                "INSERT INTO vip_plans (label, price) VALUES (?, ?)",
                 (label, price)
             )
         await db.commit()
@@ -202,7 +203,6 @@ async def init_default_coupon(db):
 # ============================================================
 
 async def add_user(user_id: int, username: str = None, first_name: str = None):
-    """افزودن کاربر جدید یا به‌روزرسانی اطلاعات"""
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             "INSERT OR IGNORE INTO users (user_id, username, first_name, last_activity) VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
@@ -211,7 +211,6 @@ async def add_user(user_id: int, username: str = None, first_name: str = None):
         await db.commit()
 
 async def update_activity(user_id: int):
-    """به‌روزرسانی زمان آخرین فعالیت کاربر"""
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             "UPDATE users SET last_activity = CURRENT_TIMESTAMP WHERE user_id = ?",
@@ -562,35 +561,35 @@ async def use_coupon(code: str) -> bool:
 # ====================== توابع پلن‌ها ======================
 # ============================================================
 
-async def get_gaming_plans():
+async def get_normal_plans():
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
-            "SELECT id, volume_gb, price FROM gaming_plans WHERE active = 1 ORDER BY volume_gb ASC"
+            "SELECT id, volume_gb, price FROM normal_plans WHERE active = 1 ORDER BY volume_gb ASC"
         )
         rows = await cursor.fetchall()
         return rows
 
-async def get_gaming_plan(plan_id: int):
+async def get_normal_plan(plan_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
-            "SELECT id, volume_gb, price FROM gaming_plans WHERE id = ? AND active = 1",
+            "SELECT id, volume_gb, price FROM normal_plans WHERE id = ? AND active = 1",
             (plan_id,)
         )
         row = await cursor.fetchone()
         return row
 
-async def get_multi_plans():
+async def get_vip_plans():
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
-            "SELECT id, label, price FROM multi_plans WHERE active = 1 ORDER BY price ASC"
+            "SELECT id, label, price FROM vip_plans WHERE active = 1 ORDER BY price ASC"
         )
         rows = await cursor.fetchall()
         return rows
 
-async def get_multi_plan(plan_id: int):
+async def get_vip_plan(plan_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
-            "SELECT id, label, price FROM multi_plans WHERE id = ? AND active = 1",
+            "SELECT id, label, price FROM vip_plans WHERE id = ? AND active = 1",
             (plan_id,)
         )
         row = await cursor.fetchone()
