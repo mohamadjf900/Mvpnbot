@@ -106,7 +106,7 @@ async def admin_button(message: Message):
     if message.from_user.id not in config.ADMIN_IDS:
         await message.answer("❌ شما دسترسی ادمین ندارید!")
         return
-    text = "⚙️ **پنل مدیریت**\n\nدستورات موجود:\n/stats - آمار کاربران\n/broadcast - ارسال همگانی\n/backup - بکاپ دیتابیس\n/restore - بازیابی دیتابیس\n/orders - مشاهده سفارشات\n/add_proxy - افزودن پروکسی\n/add_v2ray - افزودن V2Ray\n/add_wireguard - افزودن WireGuard"
+    text = "⚙️ **پنل مدیریت**\n\nدستورات موجود:\n/stats - آمار کاربران\n/broadcast - ارسال همگانی\n/backup - بکاپ دیتابیس\n/restore - بازیابی دیتابیس\n/orders - مشاهده سفارشات\n/add_proxy - افزودن پروکسی\n/add_v2ray - افزودن V2Ray\n/add_wireguard - افزودن WireGuard\n/show_plans - مشاهده پلن‌ها\n/add_normal - اضافه کردن پلن عادی\n/add_vip - اضافه کردن پلن ویژه\n/edit_normal - ویرایش پلن عادی\n/edit_vip - ویرایش پلن ویژه\n/delete_plan - حذف پلن"
     await message.answer(text, reply_markup=main_menu_keyboard(message.from_user.id))
 
 # ====================== دکمه‌های Inline (برای بازگشت و عضویت) ======================
