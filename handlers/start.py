@@ -4,6 +4,7 @@ from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import database as db
 import config
+import aiosqlite
 
 router = Router()
 
@@ -14,8 +15,9 @@ async def main_menu_keyboard():
     builder.button(text="🔒 WireGuard", callback_data="menu_wireguard")
     builder.button(text="🎮 DNS گیمرها", callback_data="menu_dns")
     builder.button(text="💼 خرید", callback_data="menu_buy")
+    builder.button(text="🎫 تیکت پشتیبانی", callback_data="menu_ticket")
+    builder.button(text="👥 دعوت دوستان", callback_data="menu_invite")
     builder.button(text="📞 پشتیبانی", callback_data="menu_support")
-    builder.button(text="👥 دعوت دوستان", callback_data="menu_invite")  # دکمه جدید
     builder.adjust(2)
     return builder.as_markup()
 
@@ -26,16 +28,12 @@ async def start_handler(message: Message):
     await db.update_activity(user.id)
     await db.log_usage(user.id, "start")
     
-    # ====== بررسی لینک دعوت ======
+    # ====== پردازش لینک دعوت ======
     args = message.text.split()
     if len(args) > 1 and args[1].startswith("ref_"):
-        code = args[1][4:]  # حذف ref_
-        # پیدا کردن کاربر دعوت‌کننده
+        code = args[1][4:]
         async with aiosqlite.connect(db.DB_PATH) as conn:
-            async with conn.execute(
-                "SELECT user_id FROM referrals WHERE code = ?",
-                (code,)
-            ) as cursor:
+            async with conn.execute("SELECT user_id FROM referrals WHERE code = ?", (code,)) as cursor:
                 row = await cursor.fetchone()
                 if row and row[0] != message.from_user.id:
                     await db.register_referral(row[0], message.from_user.id)
@@ -43,7 +41,6 @@ async def start_handler(message: Message):
                 elif row and row[0] == message.from_user.id:
                     await message.answer("🔁 شما نمی‌توانید خودتان را دعوت کنید!")
     
-    # ====== پیام خوش‌آمدگویی ======
     text = "به ربات VPN و پروکسی خوش آمدید!\nاز منوی زیر انتخاب کنید:"
     await message.answer(text, reply_markup=await main_menu_keyboard())
 
@@ -61,6 +58,6 @@ async def check_join_callback(callback: CallbackQuery, bot):
             await callback.message.delete()
             await start_handler(callback.message)
         else:
-            await callback.answer("❌ شما هنوز عضو نشده‌اید! لطفاً ابتدا عضو شوید.", show_alert=True)
+            await callback.answer("❌ شما هنوز عضو نشده‌اید!", show_alert=True)
     except:
-        await callback.answer("خطا در بررسی عضویت! لطفاً دوباره تلاش کنید.", show_alert=True)
+        await callback.answer("خطا در بررسی عضویت!", show_alert=True)
